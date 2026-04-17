@@ -1,0 +1,57 @@
+{
+  "policy": {
+    "portfolio_budget_usd": 10000,
+    "stop_loss_pct": 0.02,
+    "take_profit_pct": 0.06,
+    "max_leverage": 2,
+    "min_confidence_directional": 0.30,
+    "trade_cooldown_bars": 8,
+    "allows_short": true,
+    "order_max_add_btc": 0.12,
+    "order_max_add_notional_usd": 1200,
+    "intent_notional_fraction": 0.18,
+    "rule_sentiment_buy_min": 38,
+    "rule_sentiment_sell_below": 33,
+    "bull_exposure_floor": 0.75,
+    "bear_exposure_cap": 0.35,
+    "risk_max_drawdown_stop": 0.14,
+    "risk_kill_switch_cooldown_bars": 80,
+    "risk_position_cap_usd": 2500,
+    
+    "balanced_trading": {
+      "enable_smart_sizing": true,
+      "volatility_adjusted_position": true,
+      "momentum_filter": true,
+      "trend_confirmation_bars": 3,
+      "enable_correlation_filter": true,
+      "max_correlation_threshold": 0.7
+    },
+    
+    "symbol_universe": [
+      "BTC/USDT",
+      "ETH/USDT", 
+      "SOL/USDT",
+      "BNB/USDT",
+      "XRP/USDT",
+      "ADA/USDT",
+      "AVAX/USDT",
+      "DOT/USDT"
+    ],
+    
+    "timeframe_strategy": {
+      "primary_timeframe": "1d",
+      "secondary_confirmation": "4h",
+      "enable_trend_filter": true,
+      "require_volume_confirmation": true,
+      "min_volume_ratio": 1.2
+    },
+    
+    "risk_management": {
+      "max_portfolio_risk": 0.02,
+      "max_symbol_risk": 0.005,
+      "correlation_adjustment": true,
+      "volatility_scaling": true,
+      "drawdown_protection": true
+    }
+  }
+}

@@ -1,0 +1,50 @@
+{
+  "policy": {
+    "portfolio_budget_usd": 10000,
+    "stop_loss_pct": 0.015,
+    "take_profit_pct": 0.04,
+    "max_leverage": 2,
+    "min_confidence_directional": 0.25,
+    "trade_cooldown_bars": 6,
+    "allows_short": true,
+    "order_max_add_btc": 0.15,
+    "order_max_add_notional_usd": 1500,
+    "intent_notional_fraction": 0.15,
+    "rule_sentiment_buy_min": 35,
+    "rule_sentiment_sell_below": 30,
+    "bull_exposure_floor": 0.7,
+    "bear_exposure_cap": 0.4,
+    "risk_max_drawdown_stop": 0.12,
+    "risk_kill_switch_cooldown_bars": 60,
+    "risk_position_cap_usd": 2000,
+    
+    "frequent_trading": {
+      "enable_high_frequency_mode": true,
+      "max_trades_per_week": 10,
+      "volatility_scaling": true,
+      "momentum_multiplier": 1.5,
+      "enable_market_making": false,
+      "spread_target_pct": 0.002
+    },
+    
+    "symbol_universe": [
+      "BTC/USDT",
+      "ETH/USDT", 
+      "SOL/USDT",
+      "BNB/USDT",
+      "XRP/USDT",
+      "ADA/USDT",
+      "AVAX/USDT",
+      "DOT/USDT",
+      "LINK/USDT",
+      "MATIC/USDT"
+    ],
+    
+    "timeframe_optimization": {
+      "primary_timeframe": "4h",
+      "secondary_timeframe": "1d",
+      "signal_confirmation_bars": 2,
+      "enable_multitimeframe_analysis": true
+    }
+  }
+}
