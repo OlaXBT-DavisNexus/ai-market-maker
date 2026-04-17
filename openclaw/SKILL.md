@@ -30,14 +30,14 @@ python3 openclaw/scripts/claw_runner.py --verify
 
 ### Usage
 ```bash
-# Demo backtest (optimized for good results)
-python3 openclaw/scripts/claw_runner.py --demo
+# Backtest with optimized settings (good results)
+python3 openclaw/scripts/claw_runner.py --backtest
 
 # Paper trading
 python3 openclaw/scripts/claw_runner.py --paper --ticker BTC/USDT
 
-# Backtesting
-python3 openclaw/scripts/claw_runner.py --backtest --symbols BTC/USDT --steps 100
+# Custom backtest
+python3 openclaw/scripts/claw_runner.py --backtest --symbols "BTC/USDT,ETH/USDT" --steps 150
 ```
 
 ## 🔧 OpenClaw-Specific Features

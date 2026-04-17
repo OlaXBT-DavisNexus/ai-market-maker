@@ -75,13 +75,28 @@ def run_paper_trading(ticker="BTC/USDT"):
         return 1
 
 
-def run_backtest(symbols="BTC/USDT", steps=100):
-    """Run backtest demo"""
+def run_backtest(symbols="BTC/USDT,ETH/USDT,SOL/USDT", steps=100):
+    """Run backtest with optimized settings for good results"""
     print(f"📈 Running backtest for {symbols} ({steps} steps)")
+    print("🔧 Using optimized default settings")
+    
     try:
         from src.backtest.run_demo import main as backtest_main
 
-        sys.argv = ["run_demo.py", "--symbols", symbols, "--steps", str(steps)]
+        # Use online mode with optimized parameters
+        sys.argv = [
+            "run_demo.py", 
+            "--symbols", symbols,
+            "--steps", str(steps),
+            "--online",
+            "--exchange", "binance",
+            "--timeframe", "1d",
+            "--initial-cash", "10000"
+        ]
+        
+        # Add --ticker-only if only one symbol
+        if len(symbols.split(',')) == 1:
+            sys.argv.append("--ticker-only")
 
         return backtest_main()
     except Exception as e:
@@ -171,48 +186,6 @@ def verify_installation():
         return 1
 
 
-def run_demo_backtest():
-    """Run demo backtest with optimized settings for good results"""
-    print("🚀 Running Demo Backtest (Optimized Settings)")
-    print("=" * 50)
-    
-    # Set demo policy
-    project_root = Path(__file__).parent.parent.parent
-    demo_policy = project_root / "config" / "policy.demo.json"
-    
-    if not demo_policy.exists():
-        print("❌ Demo policy config not found")
-        return 1
-    
-    os.environ["AIMM_POLICY_PATH"] = str(demo_policy)
-    
-    # Run demo backtest
-    try:
-        # Import and run the demo script
-        demo_script = project_root / "scripts" / "run_demo_backtest.py"
-        
-        if not demo_script.exists():
-            print(f"❌ Demo script not found: {demo_script}")
-            return 1
-        
-        # Execute the demo script
-        import subprocess
-        result = subprocess.run([sys.executable, str(demo_script)], 
-                              cwd=project_root,
-                              capture_output=True,
-                              text=True)
-        
-        print(result.stdout)
-        if result.stderr:
-            print("⚠️  Warnings/Errors:", result.stderr)
-        
-        return result.returncode
-        
-    except Exception as e:
-        print(f"❌ Demo backtest failed: {e}")
-        return 1
-
-
 def main():
     """Main entry point for OpenClaw"""
     parser = argparse.ArgumentParser(description="AI Market Maker - OpenClaw Edition")
@@ -224,7 +197,6 @@ def main():
     )
     parser.add_argument("--steps", type=int, default=100, help="Backtest steps (default: 100)")
     parser.add_argument("--verify", action="store_true", help="Verify installation")
-    parser.add_argument("--demo", action="store_true", help="Run demo backtest with optimized settings")
     parser.add_argument("--version", action="store_true", help="Show version info")
 
     args = parser.parse_args()
@@ -244,19 +216,17 @@ def main():
 
     if args.verify:
         return verify_installation()
-    elif args.demo:
-        return run_demo_backtest()
     elif args.backtest:
         return run_backtest(args.symbols, args.steps)
     elif args.paper:
         return run_paper_trading(args.ticker)
     else:
-        # Default: verify and run demo backtest
-        print("No mode specified. Running verification and demo backtest...\n")
+        # Default: verify and run backtest with optimized settings
+        print("No mode specified. Running verification and backtest...\n")
         verify_result = verify_installation()
         if verify_result == 0:
             print("\n" + "=" * 50)
-            return run_demo_backtest()
+            return run_backtest("BTC/USDT,ETH/USDT,SOL/USDT", 100)
         else:
             return verify_result
 
