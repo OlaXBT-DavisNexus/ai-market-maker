@@ -253,6 +253,23 @@ claw skill install ./openclaw
 - Full compatibility with Claw skill system
 - Multi-language documentation support (English, Korean)
 - Complete examples for different usage scenarios
+- Demo backtest with optimized settings for good results
+
+### Quick Demo
+
+```bash
+# Run quick demo (shows good backtest results)
+./scripts/quick_demo.sh
+
+# Or use the OpenClaw runner
+python3 openclaw/scripts/claw_runner.py --demo
+
+# Demo optimizes for:
+# • Better trade frequency (5+ trades in 100 steps)
+# • Positive excess returns vs buy & hold
+# • Multiple symbols for more opportunities
+# • Lower confidence thresholds for more signals
+```
 
 ---
 

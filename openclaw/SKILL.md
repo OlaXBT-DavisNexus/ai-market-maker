@@ -30,6 +30,9 @@ python3 openclaw/scripts/claw_runner.py --verify
 
 ### Usage
 ```bash
+# Demo backtest (optimized for good results)
+python3 openclaw/scripts/claw_runner.py --demo
+
 # Paper trading
 python3 openclaw/scripts/claw_runner.py --paper --ticker BTC/USDT
 
