@@ -1,9 +1,11 @@
 """CLI entry point for the research note generator.
 
 Usage:
-    python -m src.backtest.research.publish daily       # Quick daily brief
-    python -m src.backtest.research.publish weekly      # Weekly deep dive
-    python -m src.backtest.research.publish custom "my topic"  # Custom topic
+    python -m src.backtest.research.publish daily         Daily brief (US + HK + crypto)
+    python -m src.backtest.research.publish trade_read    Trade setups with entry/stop/target
+    python -m src.backtest.research.publish kol           KOL-style daily brief
+    python -m src.backtest.research.publish weekly        Weekly deep dive
+    python -m src.backtest.research.publish sectors       Sector rotation note
 
 Requires DEEPSEEK_API_KEY in environment.
 """
@@ -26,12 +28,19 @@ def main():
 
     writer = ResearchNoteWriter()
 
-    if style == "daily":
-        article = writer.quick_note() if not topic else writer.publish(topic, style="daily")
-    elif style == "weekly":
-        article = writer.weekly_note() if not topic else writer.publish(topic, style="weekly")
-    elif style == "sectors":
-        article = writer.publish(topic or "Sector rotation analysis", style="sector_rotation")
+    style_map = {
+        "daily": lambda: writer.daily_brief(topic or "US + HK + crypto market review"),
+        "trade_read": lambda: writer.trade_read(topic or "Trade setups across US + HK + crypto"),
+        "kol": lambda: writer.kol_daily(topic or "Trader's morning brief"),
+        "weekly": lambda: writer.weekly_note(),
+        "sectors": lambda: writer.publish(
+            topic or "Sector rotation analysis", style="sector_rotation"
+        ),
+    }
+
+    fn = style_map.get(style)
+    if fn:
+        article = fn()
     else:
         article = writer.publish(topic or f"Market analysis: {style}", style="daily")
 

@@ -1,10 +1,12 @@
-"""Unified data collection layer for the research pipeline.
+"""Unified data collection layer — US equities, HK stocks, and crypto.
 
 Aggregates:
-  - OHLCV prices via loader registry (yfinance / futu / ccxt fallback)
-  - Live news headlines via RSS feeds
-  - Macro context (treasury yields, USD index, VIX) via yfinance
-  - Sector ETF data for cross-sectional comparison
+  - OHLCV prices via loader registry (yfinance / ccxt / futu fallback)
+  - Live news headlines via RSS feeds (crypto + finance)
+  - Macro context (treasury yields, USD index, VIX, gold, oil) via yfinance
+  - Sector ETF data (US) for cross-sectional comparison
+  - HK market via yfinance HK tickers
+  - Crypto market via ccxt (Binance)
 """
 
 from __future__ import annotations
@@ -29,6 +31,7 @@ DEFAULT_RSS_SOURCES: Dict[str, str] = {
     "cryptoslate": "https://cryptoslate.com/feed/",
     "newsbtc": "https://www.newsbtc.com/feed/",
     "bitcoinmagazine": "https://bitcoinmagazine.com/feed",
+    "yahoo_finance": "https://finance.yahoo.com/news/rssindex",
 }
 
 # Macro tickers tracked via yfinance
@@ -59,6 +62,85 @@ SECTOR_ETFS = {
     "KRE": "Regional Banks",
 }
 
+# ── Default Watchlists ────────────────────────────────────────────
+
+DEFAULT_US_WATCHLIST = [
+    "SPY",
+    "QQQ",
+    "IWM",  # Indices
+    "AAPL",
+    "NVDA",
+    "MSFT",
+    "AMZN",
+    "GOOGL",
+    "META",
+    "TSLA",  # Mag 7
+    "AVGO",
+    "ORCL",
+    "CRM",
+    "NOW",  # Tech
+    "JPM",
+    "GS",
+    "BAC",
+    "V",
+    "MA",  # Financials
+    "UNH",
+    "LLY",
+    "JNJ",  # Healthcare
+    "XOM",
+    "CVX",  # Energy
+    "WMT",
+    "COST",
+    "PG",  # Staples
+    "AMD",
+    "INTC",
+    "QCOM",
+    "MU",  # Semis
+]
+
+DEFAULT_HK_WATCHLIST = [
+    "HSI",  # Hang Seng Index
+    "0700.HK",  # Tencent
+    "9988.HK",  # Alibaba
+    "3690.HK",  # Meituan
+    "9618.HK",  # JD
+    "1810.HK",  # Xiaomi
+    "9988.HK",  # Alibaba
+    "0700.HK",  # Tencent again
+    "1299.HK",  # AIA
+    "0005.HK",  # HSBC
+    "3988.HK",  # Bank of China
+    "0939.HK",  # CCB
+    "2269.HK",  # WuXi Biologics
+    "1024.HK",  # Kuaishou
+    "9888.HK",  # Baidu HK
+    "9999.HK",  # NetEase
+    "0017.HK",  # New World Development
+]
+
+DEFAULT_CRYPTO_WATCHLIST = [
+    "BTC/USDT",
+    "ETH/USDT",
+    "SOL/USDT",
+    "XRP/USDT",
+    "DOGE/USDT",
+    "ADA/USDT",
+    "AVAX/USDT",
+    "LINK/USDT",
+    "DOT/USDT",
+    "MATIC/USDT",
+    "NEAR/USDT",
+    "ARB/USDT",
+    "OP/USDT",
+    "INJ/USDT",
+    "TIA/USDT",
+    "SEI/USDT",
+]
+
+# ── Market Code ───────────────────────────────────────────────────
+
+MARKET_TYPES = ("us_equity", "hk_equity", "crypto")
+
 
 # ── Data Models ───────────────────────────────────────────────────
 
@@ -84,6 +166,8 @@ class PriceSnapshot:
     volume_24h: float
     high_30d: float
     low_30d: float
+    market_cap: float = 0.0
+    name: str = ""
 
 
 # ── RSS Fetcher ───────────────────────────────────────────────────
@@ -136,7 +220,7 @@ def fetch_rss(url: str, timeout: float = 15) -> List[Headline]:
 
 
 def collect_headlines(
-    sources: Optional[List[str]] = None, max_per_source: int = 5
+    sources: Optional[List[str]] = None, max_per_source: int = 3
 ) -> List[Headline]:
     items: List[Headline] = []
     rss = {k: v for k, v in DEFAULT_RSS_SOURCES.items() if sources is None or k in sources}
@@ -155,7 +239,7 @@ def fetch_ohlcv(
     days: int = 365,
     interval: str = "1D",
 ) -> Dict[str, pd.DataFrame]:
-    """Fetch OHLCV for a list of symbols, using loader registry with fallback."""
+    """Fetch OHLCV — try loader registry first, then yfinance."""
     end = datetime.now()
     start = end.replace(year=end.year - 1) if days >= 365 else end - pd.Timedelta(days=days)
     start_str = start.strftime("%Y-%m-%d")
@@ -188,6 +272,40 @@ def fetch_ohlcv(
         return results
     except ImportError:
         return {}
+
+
+def fetch_crypto_ohlcv(
+    symbols: List[str] = DEFAULT_CRYPTO_WATCHLIST,
+    days: int = 365,
+    interval: str = "1d",
+) -> Dict[str, pd.DataFrame]:
+    """Fetch crypto OHLCV via ccxt Binance."""
+    results: Dict[str, pd.DataFrame] = {}
+    try:
+        import ccxt
+
+        exchange = ccxt.binance()
+        # Convert ms to timestamp
+        since = exchange.parse8601(
+            (datetime.now(timezone.utc) - pd.Timedelta(days=days)).strftime("%Y-%m-%dT00:00:00Z")
+        )
+        for sym in symbols:
+            try:
+                ohlcv = exchange.fetch_ohlcv(
+                    sym, timeframe=interval, since=since, limit=min(days * 2, 1000)
+                )
+                if ohlcv and len(ohlcv) >= 2:
+                    df = pd.DataFrame(
+                        ohlcv, columns=["trade_date", "open", "high", "low", "close", "volume"]
+                    )
+                    df["trade_date"] = pd.to_datetime(df["trade_date"], unit="ms")
+                    df.set_index("trade_date", inplace=True)
+                    results[sym] = df
+            except Exception:
+                continue
+    except ImportError:
+        pass
+    return results
 
 
 def fetch_macro(days: int = 60) -> Dict[str, pd.DataFrame]:

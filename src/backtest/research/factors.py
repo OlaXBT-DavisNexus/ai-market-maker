@@ -1,15 +1,12 @@
-"""Quantitative factor analysis engine for the research pipeline.
+"""Quantitative factor analysis engine — US, HK, and crypto markets.
 
-Implements the core factor framework used by AIMM:
+Implements the core factor framework:
   - Technical factors: trend, momentum, mean-reversion
   - Volatility factors: regime-switching, ATR-scaled
   - Volume factors: divergence, accumulation/distribution
   - Cross-sectional factors: sector rotation, relative strength
   - Risk factors: VaR, drawdown, correlation to macro
   - Regime classification: bull/bear/transition/range-bound
-
-Each factor is computed independently then aggregated into a factor
-matrix that the writer uses as the analytical backbone.
 """
 
 from __future__ import annotations
@@ -31,27 +28,19 @@ class TechnicalFactors:
     macd_histogram: float = 0.0
     macd_line: float = 0.0
     macd_signal: float = 0.0
-    bb_width_pct: float = 0.0  # (upper - lower) / mid
-    bb_position: float = 50.0  # 0=at lower, 100=at upper
+    bb_width_pct: float = 0.0
+    bb_position: float = 50.0
     adx: float = 25.0
-    trend_direction: str = "neutral"  # bullish | bearish | neutral
-    trend_strength: str = "weak"  # strong | moderate | weak
-
-    # Momentum
+    trend_direction: str = "neutral"
+    trend_strength: str = "weak"
     roc_5d: float = 0.0
     roc_20d: float = 0.0
-    momentum_regime: str = "neutral"  # accelerating | decelerating | neutral
-
-    # Mean reversion
-    z_score: float = 0.0  # distance from 50-day MA in std
+    momentum_regime: str = "neutral"
+    z_score: float = 0.0
     distance_to_ma50_pct: float = 0.0
     distance_to_ma200_pct: float = 0.0
-
-    # Volume
-    obv_trend: str = "neutral"  # rising | falling | neutral
+    obv_trend: str = "neutral"
     volume_ratio_vs_20d: float = 1.0
-
-    # Support / Resistance
     nearest_support: float = 0.0
     nearest_resistance: float = 0.0
     distance_to_support_pct: float = 0.0
@@ -61,18 +50,18 @@ class TechnicalFactors:
 @dataclass
 class VolatilityFactors:
     atr_14: float = 0.0
-    atr_pct: float = 0.0  # ATR as % of price
+    atr_pct: float = 0.0
     historical_vol_20d: float = 0.0
     historical_vol_60d: float = 0.0
-    vol_regime: str = "normal"  # low | normal | elevated | extreme
-    hv_contraction_pct: float = 0.0  # negative = compressing vol
+    vol_regime: str = "normal"
+    hv_contraction_pct: float = 0.0
     max_drawdown_30d: float = 0.0
     max_drawdown_90d: float = 0.0
 
 
 @dataclass
 class RiskFactors:
-    var_95_1d: float = 0.0  # 95% VaR, 1-day horizon
+    var_95_1d: float = 0.0
     cvar_95_1d: float = 0.0
     sharpe_ratio_30d: float = 0.0
     sortino_ratio_30d: float = 0.0
@@ -86,15 +75,21 @@ class RiskFactors:
 @dataclass
 class FactorMatrix:
     symbol: str
+    market: str = "us_equity"
     technical: TechnicalFactors = field(default_factory=TechnicalFactors)
     volatility: VolatilityFactors = field(default_factory=VolatilityFactors)
     risk: RiskFactors = field(default_factory=RiskFactors)
-    regime: str = "neutral"  # bull | bear | transition | range_bound
-    composite_score: float = 50.0  # 0-100 where >65 = bullish, <35 = bearish
-
-    # Narrative hooks extracted by factor analysis
+    regime: str = "neutral"
+    composite_score: float = 50.0
     key_observation: str = ""
     risk_warning: str = ""
+
+    # Trade Read specific fields
+    trade_bias: str = "neutral"  # long | short | neutral
+    conviction: str = "low"  # high | medium | low
+    stop_loss_level: float = 0.0
+    target_level: float = 0.0
+    risk_reward_ratio: float = 0.0
 
 
 # ── Regime Detection ──────────────────────────────────────────────
@@ -102,49 +97,36 @@ class FactorMatrix:
 
 def _detect_regime(close: pd.Series, ma50: pd.Series, ma200: pd.Series, adx: float) -> str:
     """Classify market regime based on moving average alignment and ADX."""
-    if len(close) < 200 or ma50.isna().all() or ma200.isna().all():
+    if len(close) < 50 or ma50.isna().all():
         return "neutral"
 
     last_close = close.iloc[-1]
     last_ma50 = ma50.iloc[-1]
     last_ma200 = ma200.iloc[-1]
 
-    if pd.isna(last_ma50) or pd.isna(last_ma200) or last_ma200 <= 0:
+    if pd.isna(last_ma50):
         return "neutral"
 
     above_50 = last_close > last_ma50 * 1.01
-    above_200 = last_close > last_ma200 * 1.01
-    ma50_above_200 = last_ma50 > last_ma200 * 1.01
-    crossover_recent = False
-
-    # Detect crossovers in last 5 bars
-    if len(ma50) >= 5 and len(ma200) >= 5:
-        for i in range(-5, 0):
-            if abs(i) > len(ma50) or abs(i) > len(ma200):
-                continue
-            prev_50 = ma50.iloc[i - 1] if i - 1 >= len(ma50) else ma50.iloc[i]
-            prev_200 = ma200.iloc[i - 1] if i - 1 >= len(ma200) else ma200.iloc[i]
-            if (prev_50 <= prev_200 and ma50.iloc[i] > ma200.iloc[i]) or (
-                prev_50 >= prev_200 and ma50.iloc[i] < ma200.iloc[i]
-            ):
-                crossover_recent = True
-                break
+    has_ma200 = not (pd.isna(last_ma200) or last_ma200 <= 0)
+    above_200 = last_close > last_ma200 * 1.01 if has_ma200 else False
+    ma50_above_200 = last_ma50 > last_ma200 * 1.01 if has_ma200 else True
 
     trend_strength = "strong" if adx > 30 else "moderate" if adx > 20 else "weak"
 
-    if above_200 and ma50_above_200:
+    if has_ma200 and above_200 and ma50_above_200:
         return "bull" if trend_strength != "weak" else "range_bound"
-    elif not above_200 and not above_50:
+    elif has_ma200 and not above_200 and not above_50:
         return "bear" if trend_strength != "weak" else "range_bound"
-    elif crossover_recent:
-        return "transition"
-    elif not ma50_above_200 and above_200:
-        return "transition"
+    elif not has_ma200 and above_50:
+        return "bull" if trend_strength != "weak" else "range_bound"
+    elif not has_ma200 and not above_50:
+        return "bear" if trend_strength != "weak" else "range_bound"
 
     return "range_bound"
 
 
-# ── Technical Indicator Computation ────────────────────────────────
+# ── Indicator Computation ────────────────────────────────────────
 
 
 def _ema(series: pd.Series, period: int) -> pd.Series:
@@ -153,25 +135,25 @@ def _ema(series: pd.Series, period: int) -> pd.Series:
 
 def _true_range(high: pd.Series, low: pd.Series, close: pd.Series) -> pd.Series:
     prev_close = close.shift(1)
-    tr = pd.concat(
-        [
-            high - low,
-            (high - prev_close).abs(),
-            (low - prev_close).abs(),
-        ],
-        axis=1,
-    ).max(axis=1)
+    tr = pd.concat([high - low, (high - prev_close).abs(), (low - prev_close).abs()], axis=1).max(
+        axis=1
+    )
     return tr
 
 
 def compute_technical_factors(
     df: pd.DataFrame,
     symbol: str,
-    spy_df: Optional[pd.DataFrame] = None,
+    market: str = "us_equity",
+    benchmark_df: Optional[pd.DataFrame] = None,
+    use_short_ma: bool = False,
 ) -> FactorMatrix:
-    """Compute the full factor matrix for a single symbol."""
-    if df.empty or len(df) < 30:
-        return FactorMatrix(symbol=symbol)
+    """Compute the full factor matrix for a single symbol.
+
+    use_short_ma=True: use 20/50 MA instead of 50/200 (for crypto or short-history assets).
+    """
+    if df.empty or len(df) < 20:
+        return FactorMatrix(symbol=symbol, market=market)
 
     close = df["close"]
     high = df["high"]
@@ -184,33 +166,32 @@ def compute_technical_factors(
     risk = RiskFactors()
 
     # ── Moving Averages ──
-    ma20 = close.rolling(20).mean()
-    ma50 = (
+    ma_long_period = 50 if use_short_ma else 200
+
+    ma_short = close.rolling(20).mean()
+    ma_long = (
         close.rolling(50).mean() if len(close) >= 50 else pd.Series(index=close.index, dtype=float)
     )
-    ma200 = (
-        close.rolling(200).mean()
-        if len(close) >= 200
+    ma_extra = (
+        close.rolling(ma_long_period).mean()
+        if len(close) >= ma_long_period
         else pd.Series(index=close.index, dtype=float)
     )
+    ma50 = ma_long
 
-    if not ma20.isna().all():
-        tech.distance_to_ma50_pct = (
-            float(((close.iloc[-1] / ma20.iloc[-1]) - 1) * 100)
-            if not pd.isna(ma20.iloc[-1])
+    if len(ma_short) > 0 and not ma_short.isna().all() and not pd.isna(ma_short.iloc[-1]):
+        tech.distance_to_ma50_pct = float(((close.iloc[-1] / ma_short.iloc[-1]) - 1) * 100)
+        tech.z_score = (
+            float((close.iloc[-1] - ma_short.iloc[-1]) / close.rolling(50).std().iloc[-1])
+            if close.rolling(50).std().iloc[-1] > 0
             else 0.0
         )
 
     if len(ma50) > 0 and not ma50.isna().all() and not pd.isna(ma50.iloc[-1]):
         tech.distance_to_ma50_pct = float(((close.iloc[-1] / ma50.iloc[-1]) - 1) * 100)
-        tech.z_score = (
-            float((close.iloc[-1] - ma50.iloc[-1]) / close.rolling(50).std().iloc[-1])
-            if close.rolling(50).std().iloc[-1] > 0
-            else 0.0
-        )
 
-    if len(ma200) > 0 and not ma200.isna().all() and not pd.isna(ma200.iloc[-1]):
-        tech.distance_to_ma200_pct = float(((close.iloc[-1] / ma200.iloc[-1]) - 1) * 100)
+    if len(ma_extra) > 0 and not ma_extra.isna().all() and not pd.isna(ma_extra.iloc[-1]):
+        tech.distance_to_ma200_pct = float(((close.iloc[-1] / ma_extra.iloc[-1]) - 1) * 100)
 
     # ── RSI ──
     delta = close.diff()
@@ -239,7 +220,7 @@ def compute_technical_factors(
 
     # ── Bollinger Bands ──
     bb_std = close.rolling(20).std()
-    bb_mid = ma20
+    bb_mid = close.rolling(20).mean()
     bb_upper = bb_mid + 2 * bb_std
     bb_lower = bb_mid - 2 * bb_std
     if not pd.isna(bb_mid.iloc[-1]) and bb_mid.iloc[-1] > 0:
@@ -256,7 +237,6 @@ def compute_technical_factors(
     vol_f.atr_14 = float(atr.iloc[-1]) if not pd.isna(atr.iloc[-1]) and latest > 0 else 0.0
     vol_f.atr_pct = float((vol_f.atr_14 / latest) * 100) if latest > 0 else 0.0
 
-    # Directional movement
     up_move = high - high.shift(1)
     down_move = low.shift(1) - low
     plus_dm = pd.Series(0.0, index=close.index)
@@ -272,7 +252,6 @@ def compute_technical_factors(
     else:
         tech.adx = 25.0
 
-    # Trend direction from DMI
     if (
         len(plus_di) > 0
         and len(minus_di) > 0
@@ -300,13 +279,12 @@ def compute_technical_factors(
             else 0.0
         )
 
-    # Momentum regime
     if tech.roc_5d > 3 and tech.roc_20d > 5:
         tech.momentum_regime = "accelerating"
     elif tech.roc_5d < -3 and tech.roc_20d < -5:
         tech.momentum_regime = "decelerating"
 
-    # ── OBV (On-Balance Volume) ──
+    # ── OBV ──
     obv = (volume * (close.diff().apply(lambda x: 1 if x > 0 else (-1 if x < 0 else 0)))).cumsum()
     if len(obv) > 10:
         obv_ma5 = obv.rolling(5).mean()
@@ -317,7 +295,6 @@ def compute_technical_factors(
         )
         tech.obv_trend = "rising" if obv_slope > 0 else "falling" if obv_slope < 0 else "neutral"
 
-    # Volume ratio
     if len(volume) > 20:
         avg_vol_20d = volume.iloc[-20:].mean()
         tech.volume_ratio_vs_20d = float(volume.iloc[-1] / avg_vol_20d) if avg_vol_20d > 0 else 1.0
@@ -347,17 +324,15 @@ def compute_technical_factors(
         float(returns.tail(60).std() * (252**0.5) * 100) if len(returns) >= 60 else 0.0
     )
 
-    # Vol contraction Vs 60d
     if vol_f.historical_vol_60d > 0:
         vol_f.hv_contraction_pct = float(
             ((vol_f.historical_vol_20d / vol_f.historical_vol_60d) - 1) * 100
         )
 
-    # Vol regime
     hv = vol_f.historical_vol_20d
-    if hv > 60:
+    if hv > 80:
         vol_f.vol_regime = "extreme"
-    elif hv > 40:
+    elif hv > 45:
         vol_f.vol_regime = "elevated"
     elif hv < 15:
         vol_f.vol_regime = "low"
@@ -378,10 +353,9 @@ def compute_technical_factors(
         risk.skewness_20d = float(returns.tail(20).skew())
         risk.kurtosis_20d = float(returns.tail(20).kurtosis())
 
-    # Sharpe / Sortino (30-day)
     if len(returns) >= 30:
         r30 = returns.tail(30)
-        rf = 0.05 / 365  # daily risk-free approximation
+        rf = 0.05 / 365
         excess = r30 - rf
         risk.sharpe_ratio_30d = (
             float((excess.mean() / r30.std()) * (252**0.5)) if r30.std() > 0 else 0.0
@@ -393,90 +367,94 @@ def compute_technical_factors(
             else 0.0
         )
 
-    # Calmar (90-day)
     if len(returns) >= 90:
         r90_ann = float(returns.tail(90).mean() * 252 * 100)
         dd_90 = vol_f.max_drawdown_90d
         risk.calmar_ratio_90d = r90_ann / abs(dd_90) if dd_90 != 0 else 0.0
 
-    # Beta to SPY
-    if spy_df is not None and not spy_df.empty:
-        spy_returns = spy_df["close"].pct_change().dropna()
-        aligned = pd.concat([returns, spy_returns], axis=1, join="inner").dropna()
+    # Beta to benchmark
+    if benchmark_df is not None and not benchmark_df.empty:
+        bm_returns = benchmark_df["close"].pct_change().dropna()
+        aligned = pd.concat([returns, bm_returns], axis=1, join="inner").dropna()
         if len(aligned) > 20:
             cov = aligned.iloc[:, 0].cov(aligned.iloc[:, 1])
-            spy_var = aligned.iloc[:, 1].var()
-            risk.beta_to_spy = float(cov / spy_var) if spy_var > 0 else 0.0
+            bm_var = aligned.iloc[:, 1].var()
+            risk.beta_to_spy = float(cov / bm_var) if bm_var > 0 else 0.0
             risk.correlation_to_spy = float(aligned.iloc[:, 0].corr(aligned.iloc[:, 1]))
 
     # ── Regime Classification ──
-    regime = _detect_regime(close, ma50, ma200, tech.adx)
+    regime = _detect_regime(close, ma50, ma_extra if len(ma_extra) > 0 else ma50, tech.adx)
 
     # ── Composite Score ──
     score = 50.0
-    # RSI contribution
     if tech.rsi_14 > 60:
         score += 8
     elif tech.rsi_14 < 40:
         score -= 8
-    # MACD contribution
-    if tech.macd_histogram > 0 and float(macd_line.iloc[-1] if len(macd_line) > 0 else 0) > 0:
+    if tech.macd_histogram > 0:
         score += 6
     elif tech.macd_histogram < 0:
         score -= 6
-    # Trend contribution
     if tech.trend_direction == "bullish":
         score += 6
     elif tech.trend_direction == "bearish":
         score -= 6
-    # Volume contribution
     if tech.obv_trend == "rising":
         score += 4
     elif tech.obv_trend == "falling":
         score -= 4
-    # Regime contribution
     if regime == "bull":
         score += 10
     elif regime == "bear":
         score -= 10
     elif regime == "transition":
         score -= 3
-    # Mean reversion
-    if abs(tech.z_score) > 2 and tech.z_score < 0 and tech.trend_direction == "bearish":
-        score += 5  # oversold bounce
+    if abs(tech.z_score) > 2 and tech.z_score < 0:
+        score += 5
     elif abs(tech.z_score) > 2 and tech.z_score > 0:
-        score -= 5  # overbought pullback
+        score -= 5
 
     score = max(0, min(100, score))
+
+    # ── Trade Read fields ──
+    trade_bias = "long" if score > 60 else "short" if score < 40 else "neutral"
+    conviction = "high" if abs(score - 50) > 25 else "medium" if abs(score - 50) > 15 else "low"
+    stop_loss = 0.0
+    target = 0.0
+    if trade_bias == "long":
+        stop_loss = tech.nearest_support if tech.nearest_support > 0 else latest * 0.95
+        target = tech.nearest_resistance if tech.nearest_resistance > 0 else latest * 1.05
+    elif trade_bias == "short":
+        stop_loss = tech.nearest_resistance if tech.nearest_resistance > 0 else latest * 1.05
+        target = tech.nearest_support if tech.nearest_support > 0 else latest * 0.95
+
+    rrr = abs((target - latest) / (stop_loss - latest)) if stop_loss != latest else 0.0
 
     # ── Narrative Hooks ──
     observations = []
     warnings = []
 
     if tech.rsi_14 > 70:
-        observations.append(f"RSI at {tech.rsi_14:.0f} — overbought territory, due for a pullback")
+        observations.append(f"RSI at {tech.rsi_14:.0f} — overbought, pullback likely")
         warnings.append("Overbought RSI — 70+ suggests short-term exhaustion")
     elif tech.rsi_14 < 30:
         observations.append(f"RSI at {tech.rsi_14:.0f} — oversold bounce candidate")
     if tech.adx > 40:
-        observations.append(
-            f"Strong trend detected (ADX {tech.adx:.0f}) — trending conditions favor momentum strategies"
-        )
+        observations.append(f"Strong trend (ADX {tech.adx:.0f}) — momentum strategies favored")
     if tech.adx < 15:
         observations.append(
-            f"Low ADX ({tech.adx:.0f}) — choppy / range-bound conditions, mean reversion preferred"
+            f"Low ADX ({tech.adx:.0f}) — choppy/range-bound, mean reversion preferred"
         )
-    if vol_f.vol_regime == "elevated" or vol_f.vol_regime == "extreme":
-        warnings.append(
-            f"Elevated volatility ({hv:.0f}% annualized) — reduce position sizing, widen stops"
-        )
+    if vol_f.vol_regime in ("elevated", "extreme"):
+        warnings.append(f"Elevated vol ({hv:.0f}% ann) — reduce sizing, widen stops")
     if vol_f.hv_contraction_pct < -20:
         observations.append(
-            f"Volatility compressing ({vol_f.hv_contraction_pct:.0f}% vs 60d) — breakout setup forming"
+            f"Vol compressing ({vol_f.hv_contraction_pct:.0f}% vs 60d) — breakout setup"
         )
 
-    factor_matrix = FactorMatrix(
+    return FactorMatrix(
         symbol=symbol,
+        market=market,
         technical=tech,
         volatility=vol_f,
         risk=risk,
@@ -484,28 +462,28 @@ def compute_technical_factors(
         composite_score=round(score, 1),
         key_observation=" | ".join(observations[:3]) if observations else "",
         risk_warning=" | ".join(warnings[:3]) if warnings else "",
+        trade_bias=trade_bias,
+        conviction=conviction,
+        stop_loss_level=round(stop_loss, 2) if stop_loss > 0 else 0.0,
+        target_level=round(target, 2) if target > 0 else 0.0,
+        risk_reward_ratio=round(rrr, 2),
     )
-    return factor_matrix
 
 
-# ── Sector Rotation Analysis ──────────────────────────────────────
+# ── Sector Rotation ──────────────────────────────────────────────
 
 
 @dataclass
 class SectorRotation:
-    """Cross-sectional sector rotation snapshot."""
-
-    ranking: List[Tuple[str, str, float, str]]  # (ticker, name, 30d_return, regime)
+    ranking: List[Tuple[str, str, float, str]]
     top_3: List[str]
     bottom_3: List[str]
-    rotation_direction: str  # defensive -> cyclical or cyclical -> defensive
-    concentration_risk: str  # high | moderate | low
+    rotation_direction: str
+    concentration_risk: str
 
 
 def analyze_sector_rotation(sector_dfs: Dict[str, pd.DataFrame]) -> Optional[SectorRotation]:
-    """Score each sector and detect rotation patterns."""
     scores: List[Tuple[str, str, float, str]] = []
-
     for sym, df in sector_dfs.items():
         if df.empty or len(df) < 30:
             continue
@@ -515,8 +493,6 @@ def analyze_sector_rotation(sector_dfs: Dict[str, pd.DataFrame]) -> Optional[Sec
             if not pd.isna(close.iloc[-30])
             else 0.0
         )
-
-        # Quick regime
         ma50 = (
             close.rolling(50).mean()
             if len(close) >= 50
@@ -532,7 +508,6 @@ def analyze_sector_rotation(sector_dfs: Dict[str, pd.DataFrame]) -> Optional[Sec
             )
         else:
             sector_regime = "neutral"
-
         name = SECTOR_ETFS.get(sym, sym)
         scores.append((sym, name, ret_30d, sector_regime))
 
@@ -543,7 +518,6 @@ def analyze_sector_rotation(sector_dfs: Dict[str, pd.DataFrame]) -> Optional[Sec
     top_3 = [f"{s[0]} ({s[1]})" for s in scores[:3]]
     bottom_3 = [f"{s[0]} ({s[1]})" for s in scores[-3:]]
 
-    # Determine rotation direction
     defensive = ["XLP", "XLU", "XLV"]
     cyclical = ["XLY", "XLE", "XLI", "XLF", "XLK"]
     def_perf = sum(s[2] for s in scores if s[0] in defensive) / max(
@@ -565,7 +539,5 @@ def analyze_sector_rotation(sector_dfs: Dict[str, pd.DataFrame]) -> Optional[Sec
         top_3=top_3,
         bottom_3=bottom_3,
         rotation_direction=rotation,
-        concentration_risk="high"
-        if (top_3[0].split()[0] if top_3 else "") in ["XLK", "SMH"]
-        else "moderate",
+        concentration_risk="high" if top_3[0].startswith("XLK") else "moderate",
     )

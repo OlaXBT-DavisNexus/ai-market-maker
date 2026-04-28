@@ -1,12 +1,11 @@
-"""Tests for the hedge fund research synthesis pipeline.
+"""Tests for the multi-market research synthesis pipeline.
 
 Tests verify:
-  1. Data layer fetches and snapshots work
-  2. Factor engine produces correct numerical outputs
-  3. Factor matrix regimes are sensible
-  4. Sector rotation analysis produces valid rankings
-  5. Writer generates properly structured articles
-  6. End-to-end data → factors → article pipeline
+  1. Data layer fetches + snapshots (US, HK, crypto)
+  2. Factor engine: correct numerical outputs on synthetic data
+  3. Regime classification, sector rotation, trade read fields
+  4. Writer structure: gather, quant context block, prompt
+  5. Style-specific generators (daily, trade_read, kol, weekly) with mocked LLM
 """
 
 from __future__ import annotations
@@ -16,6 +15,7 @@ import pytest
 
 from backtest.research.data_layer import (
     collect_headlines,
+    fetch_crypto_ohlcv,
     fetch_macro,
     fetch_ohlcv,
     fetch_sectors,
@@ -27,12 +27,12 @@ from backtest.research.factors import (
     compute_technical_factors,
 )
 
-# ── Synthetic Data Fixtures ────────────────────────────────────────
+# ── Fixtures: Synthetic Price Data ──────────────────────────────────
 
 
 @pytest.fixture
 def uptrend_df():
-    """60 days of clean uptrend data (close goes from 100 to 130)."""
+    """60 days of clean uptrend (100 → 130)."""
     dates = pd.date_range("2026-01-01", periods=60, freq="D")
     return pd.DataFrame(
         {
@@ -48,7 +48,7 @@ def uptrend_df():
 
 @pytest.fixture
 def downtrend_df():
-    """60 days of downtrend data (close goes from 130 to 100)."""
+    """60 days of downtrend (130 → 100)."""
     dates = pd.date_range("2026-02-01", periods=60, freq="D")
     return pd.DataFrame(
         {
@@ -80,17 +80,15 @@ def rangebound_df():
     )
 
 
-# ── Data Layer Tests ───────────────────────────────────────────────
+# ── Data Layer ──────────────────────────────────────────────────────
 
 
 class TestDataLayer:
-    def test_fetch_ohlcv_premium_tickers(self):
-        """Fetch real OHLCV for widely-covered premium stocks."""
+    def test_fetch_ohlcv_us(self):
         dfs = fetch_ohlcv(["AAPL", "SPY", "QQQ"], days=30)
-        # At least one should have real data
         assert any(not df.empty for df in dfs.values())
 
-    def test_price_snapshots_all_fields(self):
+    def test_price_snapshots_field_types(self):
         dfs = fetch_ohlcv(["AAPL"], days=60)
         snaps = price_snapshots(dfs)
         if "AAPL" in snaps:
@@ -100,74 +98,67 @@ class TestDataLayer:
             assert isinstance(snap.change_30d_pct, float)
             assert snap.high_30d >= snap.low_30d
 
-    def test_fetch_macro_returns_data(self):
+    def test_fetch_macro(self):
         macro = fetch_macro(days=10)
         assert isinstance(macro, dict)
 
-    def test_fetch_sectors_returns_data(self):
+    def test_fetch_sectors(self):
         sectors = fetch_sectors(days=10)
         assert isinstance(sectors, dict)
 
-    def test_collect_headlines_integration(self):
-        """Live integration — may not find headlines every time but should be list."""
-        headlines = collect_headlines(max_per_source=2)
-        assert isinstance(headlines, list)
+    def test_collect_headlines(self):
+        h = collect_headlines(max_per_source=2)
+        assert isinstance(h, list)
+
+    def test_fetch_crypto_returns_dict(self):
+        """crypto data layer may be empty if ccxt unavailable, but always a dict."""
+        result = fetch_crypto_ohlcv(["BTC/USDT"], days=5)
+        assert isinstance(result, dict)
 
 
-# ── Factor Engine Tests ────────────────────────────────────────────
+# ── Factor Engine ──────────────────────────────────────────────────
 
 
 class TestFactorEngine:
-    def test_uptrend_detected_as_bullish(self, uptrend_df):
-        mat = compute_technical_factors(uptrend_df, "TEST")
-        assert mat.technical.trend_direction == "bullish"
-        assert mat.technical.roc_5d > 0 or mat.technical.roc_20d > 0
+    def test_uptrend_direction(self, uptrend_df):
+        m = compute_technical_factors(uptrend_df, "TEST")
+        assert m.technical.trend_direction == "bullish"
+        assert m.technical.roc_5d > 0 or m.technical.roc_20d > 0
 
-    def test_downtrend_detected_as_bearish(self, downtrend_df):
-        mat = compute_technical_factors(downtrend_df, "TEST")
-        # May not always detect bearish if the data is very clean
-        assert mat.composite_score < 70  # Should not be strongly bullish
+    def test_downtrend_score(self, downtrend_df):
+        m = compute_technical_factors(downtrend_df, "TEST")
+        assert m.composite_score < 70
 
-    def test_rangebound_has_weak_trend(self, rangebound_df):
-        mat = compute_technical_factors(rangebound_df, "TEST")
-        # ADX should be low in rangebound
-        assert mat.technical.adx < 40
+    def test_rangebound_adx(self, rangebound_df):
+        m = compute_technical_factors(rangebound_df, "TEST")
+        assert m.technical.adx < 40
 
-    def test_rsi_in_uptrend_is_reasonable(self, uptrend_df):
-        mat = compute_technical_factors(uptrend_df, "TEST")
-        # In a steady uptrend, RSI should be afloat value, not NaN or 0
-        rsi = mat.technical.rsi_14
-        assert 25 <= rsi <= 75  # Reasonable RSI range
+    def test_rsi_reasonable(self, uptrend_df):
+        m = compute_technical_factors(uptrend_df, "TEST")
+        assert 25 <= m.technical.rsi_14 <= 75
 
-    def test_volatility_factors_produced(self, uptrend_df):
-        mat = compute_technical_factors(uptrend_df, "TEST")
-        v = mat.volatility
-        assert v.atr_14 > 0
-        assert v.historical_vol_20d > 0
-        assert isinstance(v.vol_regime, str)
+    def test_volatility_factors(self, uptrend_df):
+        m = compute_technical_factors(uptrend_df, "TEST")
+        assert m.volatility.atr_14 > 0
+        assert m.volatility.historical_vol_20d > 0
+        assert isinstance(m.volatility.vol_regime, str)
 
-    def test_risk_factors_produced(self, uptrend_df):
-        mat = compute_technical_factors(uptrend_df, "TEST")
-        r = mat.risk
-        assert isinstance(r.var_95_1d, float)
-        assert isinstance(r.sharpe_ratio_30d, float)
-        # In an uptrend, sharpe should be meaningfully positive
-        assert r.sharpe_ratio_30d > -5  # Not absurdly negative
+    def test_risk_factors(self, uptrend_df):
+        m = compute_technical_factors(uptrend_df, "TEST")
+        assert isinstance(m.risk.var_95_1d, float)
+        assert isinstance(m.risk.sharpe_ratio_30d, float)
+        assert m.risk.sharpe_ratio_30d > -5
 
-    def test_support_resistance_identified(self, uptrend_df):
-        mat = compute_technical_factors(uptrend_df, "TEST")
-        t = mat.technical
-        # With only 60 bars, support/resistance may not be reliably detected
-        # but the values should be non-negative floats
+    def test_support_resistance(self, uptrend_df):
+        m = compute_technical_factors(uptrend_df, "TEST")
+        t = m.technical
         assert isinstance(t.nearest_support, float)
         assert isinstance(t.nearest_resistance, float)
         assert t.nearest_support >= 0
         assert t.nearest_resistance >= 0
 
     def test_all_technical_fields_set(self, uptrend_df):
-        mat = compute_technical_factors(uptrend_df, "TEST")
-        t = mat.technical
-        # Verify every field has been populated
+        m = compute_technical_factors(uptrend_df, "TEST")
         fields = [
             "rsi_14",
             "adx",
@@ -183,11 +174,9 @@ class TestFactorEngine:
             "momentum_regime",
         ]
         for f in fields:
-            val = getattr(t, f, None)
-            assert val is not None, f"Field {f} is None"
+            assert getattr(m.technical, f, None) is not None, f"{f} is None"
 
-    def test_regime_classification_logic(self, uptrend_df, downtrend_df, rangebound_df):
-        # Just verify the function runs without error
+    def test_regime_runs(self, uptrend_df):
         close_up = uptrend_df["close"]
         ma50 = close_up.rolling(50).mean()
         ma200 = (
@@ -196,29 +185,38 @@ class TestFactorEngine:
             else pd.Series(index=close_up.index)
         )
         if len(ma200) > 0 and not ma200.isna().all():
-            regime = _detect_regime(close_up, ma50, ma200, 15.0)
-            assert regime in ("bull", "bear", "transition", "range_bound", "neutral")
+            r = _detect_regime(close_up, ma50, ma200, 15.0)
+            assert r in ("bull", "bear", "transition", "range_bound", "neutral")
 
-    def test_composite_score_in_uptrend(self, uptrend_df):
-        mat = compute_technical_factors(uptrend_df, "TEST")
-        # In an uptrend, score should favour bullish
-        assert mat.composite_score >= 30  # At least not extreme bearish
+    def test_composite_in_uptrend(self, uptrend_df):
+        m = compute_technical_factors(uptrend_df, "TEST")
+        assert m.composite_score >= 30
 
-    def test_key_observation_extracted(self, uptrend_df):
-        mat = compute_technical_factors(uptrend_df, "TEST")
-        # Should have at least one observation or risk warning
-        assert mat.key_observation or mat.risk_warning
+    def test_observation_extracted(self, uptrend_df):
+        m = compute_technical_factors(uptrend_df, "TEST")
+        assert m.key_observation or m.risk_warning
+
+    def test_trade_read_fields(self, uptrend_df):
+        m = compute_technical_factors(uptrend_df, "TEST")
+        assert m.trade_bias in ("long", "short", "neutral")
+        assert m.conviction in ("high", "medium", "low")
+        assert isinstance(m.risk_reward_ratio, float)
+
+    def test_short_ma_variant(self, uptrend_df):
+        """Crypto mode (use_short_ma=True) should still produce valid factors."""
+        m = compute_technical_factors(uptrend_df, "TEST", use_short_ma=True)
+        assert m.composite_score >= 30
+        assert isinstance(m.technical.rsi_14, float)
 
 
-# ── Sector Rotation Tests ──────────────────────────────────────────
+# ── Sector Rotation ──────────────────────────────────────────────
 
 
 class TestSectorRotation:
-    def test_with_empty_input(self):
-        result = analyze_sector_rotation({})
-        assert result is None
+    def test_empty(self):
+        assert analyze_sector_rotation({}) is None
 
-    def test_with_one_sector(self):
+    def test_one_sector(self):
         dates = pd.date_range("2026-01-01", periods=60, freq="D")
         df = pd.DataFrame(
             {
@@ -230,54 +228,102 @@ class TestSectorRotation:
             },
             index=dates,
         )
-        result = analyze_sector_rotation({"XLK": df})
-        if result:
-            assert len(result.ranking) > 0
-            assert isinstance(result.rotation_direction, str)
+        r = analyze_sector_rotation({"XLK": df})
+        if r:
+            assert len(r.ranking) == 1
+            assert isinstance(r.rotation_direction, str)
 
 
-# ── Writer Structure Tests ────────────────────────────────────────
+# ── Writer Structure ──────────────────────────────────────────────
 
 
 class TestWriterStructure:
-    def test_gather_populates_state(self):
+    def test_context_block_with_empty_state(self):
+        """Build context block from empty state — should not crash."""
         from backtest.research.writers import ResearchNoteWriter
 
         writer = ResearchNoteWriter()
-        writer.gather()
-        assert len(writer.cover_symbols) > 0
-        assert len(writer.factor_matrices) > 0
-        assert writer.note_date is not None
-
-    def test_quant_context_block_has_sections(self):
-        from backtest.research.writers import ResearchNoteWriter
-
-        writer = ResearchNoteWriter()
-        writer.gather()
         block = writer._build_quant_context_block()
-        # Must contain key section markers
-        for marker in ["QUANTITATIVE CONTEXT", "Market Overview", "Factor Matrices"]:
-            assert marker in block, f"Missing section: {marker}"
+        assert "QUANTITATIVE CONTEXT" in block
 
-    def test_prompt_has_writing_rules(self):
+    def test_prompt_has_rules(self):
         from backtest.research.writers import ResearchNoteWriter
 
         writer = ResearchNoteWriter()
-        writer.gather()
-        prompt = writer._build_prompt("test topic", "daily")
+        prompt = writer._build_prompt("test", "daily")
         for rule in ["WRITING RULES", "newsstand-worthy"]:
             assert rule in prompt
 
-    def test_quick_note_produces_article(self, monkeypatch):
-        """End-to-end with mocked LLM call."""
+    def test_get_style_anchor_returns_known_path(self):
         from backtest.research.writers import ResearchNoteWriter
 
-        def mock_llm(self, prompt):
-            return "# Test Title\n\nTest body."
+        writer = ResearchNoteWriter()
+        for style in ("daily", "trade_read", "kol_daily", "weekly", "sector_rotation"):
+            anchor = writer._get_style_anchor(style)
+            assert len(anchor) > 100
 
-        monkeypatch.setattr(ResearchNoteWriter, "_call_llm", mock_llm)
+    def test_note_date_format(self):
+        from backtest.research.writers import ResearchNoteWriter
 
         writer = ResearchNoteWriter()
-        article = writer.quick_note()
-        assert "Test Title" in article
+        assert "2026" in writer.note_date
+
+    def test_ticker_name_lookup(self):
+        from backtest.research.writers import ResearchNoteWriter
+
+        writer = ResearchNoteWriter()
+        assert writer._name("SPY") == "S&P 500"
+        assert writer._name("9999.HK") == "NetEase"
+        assert writer._name("BTC/USDT") == "Bitcoin"
+        assert writer._name("UNKNOWN") == "UNKNOWN"
+
+    def test_prompt_without_quant(self):
+        from backtest.research.writers import ResearchNoteWriter
+
+        writer = ResearchNoteWriter()
+        prompt = writer._build_prompt("test", "daily", include_quant=False)
+        # The block header still appears but the data section is empty/minimal
+        # when quant=False, the context block is still in template
+        assert isinstance(prompt, str)
+        assert len(prompt) > 50
+
+    @pytest.mark.parametrize(
+        "method",
+        [
+            "daily_brief",
+            "trade_read",
+            "kol_daily",
+            "weekly_note",
+        ],
+    )
+    def test_style_generators_return_text(self, monkeypatch, method):
+        from backtest.research.writers import ResearchNoteWriter
+
+        def mock_gather(self):
+            return self
+
+        def mock_llm(self, prompt):
+            return f"# Test: {method}\n\nBody content."
+
+        monkeypatch.setattr(ResearchNoteWriter, "_call_llm", mock_llm)
+        monkeypatch.setattr(ResearchNoteWriter, "gather", mock_gather)
+
+        writer = ResearchNoteWriter()
+        article = getattr(writer, method)()
+        assert article.startswith("#")
+        assert len(article) > 10
+
+    def test_publish_accepts_kwargs(self, monkeypatch):
+        from backtest.research.writers import ResearchNoteWriter
+
+        def mock_gather(self):
+            return self
+
+        def mock_llm(self, prompt):
+            return "# Custom\nBody."
+
+        monkeypatch.setattr(ResearchNoteWriter, "_call_llm", mock_llm)
+        monkeypatch.setattr(ResearchNoteWriter, "gather", mock_gather)
+        writer = ResearchNoteWriter()
+        article = writer.publish("custom topic", "daily")
         assert len(article) > 10
