@@ -1,19 +1,26 @@
-"""Research note writer — multi-market, multi-style. Daily brief, Trade Read, KOL post.
+"""Research note writer — multi-persona, multi-market.
 
-Writing style references:
-  - **Daily Brief**: JPM / Goldman morning note. Macro first, sector rotation, 2-3 actionable
-    names. Punchy. Data-driven.
-  - **Trade Read**: Position-level write-up. Why this trade, entry, stop, target, conviction.
-    Common on futu niu niu / Webull / TradingView.
-  - **KOL Daily**: Twitter-style. More narrative, opinionated, mix of macro + specific setups +
-    risk awareness. Popular on Chinese trading apps.
+6 distinct writer personas + 2 bonus formats = 8 content types total.
 
-No AI filler. Every claim backed by numbers from the factor engine.
+PERSONAS:
+  1. MACRO QUANT — sell-side strategist, data-first, macro lens (JPM/Goldman PM)
+  2. TRADE READ — KOL position analyst, entry/stop/target (futu niu niu style)
+  3. ON-CHAIN DETECTIVE — crypto-native, on-chain flows, whale tracking
+  4. OPTIONS GREEKS — derivatives lens, vol surface, gamma positioning
+  5. NARRATIVE TRADER — story-driven, catalyst-focused, theme rotation
+  6. RISK PARITY — portfolio construction, correlation, positioning
+
+FORMAT BONUS:
+  7. Morning Call — 3-minute video script format
+  8. Data Snapshot — pure data release, no LLM
+
+Each persona has a distinct system prompt, structure, tone, and analytical focus.
 """
 
 from __future__ import annotations
 
 import os
+from dataclasses import dataclass
 from datetime import datetime, timezone
 from typing import Any, Dict, List, Optional
 
@@ -40,10 +47,220 @@ from .factors import (
 DEFAULT_MODEL = os.environ.get("RESEARCH_LLM_MODEL", "deepseek/deepseek-chat")
 
 
-class ResearchNoteWriter:
-    """Generate publication-quality research notes across US/HK/crypto markets."""
+# ── Persona Registry ──────────────────────────────────────────────
 
-    # ── Human-readable name registry for tickers ──
+
+@dataclass
+class Persona:
+    """Defines a writer persona with voice, tone, and analytical lens."""
+
+    id: str
+    name: str
+    tagline: str
+    structure: str
+    tone_guide: str
+    analytical_focus: str
+    sample_topics: List[str]
+
+    def system_prompt(self) -> str:
+        return (
+            f"You are {self.name}. {self.tagline}\n\n"
+            f"STRUCTURE:\n{self.structure}\n\n"
+            f"TONE: {self.tone_guide}\n\n"
+            f"ANALYTICAL FOCUS: {self.analytical_focus}\n\n"
+            f"WRITING RULES (NON-NEGOTIABLE):\n"
+            f"1. Follow the structure exactly.\n"
+            f"2. Every claim references a specific number from the data.\n"
+            f"3. Active voice, decisive tone. No hedging.\n"
+            f"4. Zero AI-sounding language. No 'Based on the data provided', no 'It is important to note'.\n"
+            f"5. Mix macro, sectors, and specific names. Tell a coherent story.\n"
+            f"6. Title must be newsstand-worthy: generates curiosity, telegraphs the view.\n"
+            f"7. End with 3-5 'What I'm Watching' bullets at the end with concrete levels/dates.\n"
+            f"8. Closing: 'Bottom Line' with a clear positioning view.\n\n"
+            f"Output ONLY the article. Title first. Sections separated by blank lines. No preamble."
+        )
+
+
+# ── 8 Personas ───────────────────────────────────────────────────
+
+PERSONAS: Dict[str, Persona] = {
+    "macro_quant": Persona(
+        id="macro_quant",
+        name="Macro Quant (JPM/Goldman sell-side)",
+        tagline="Data-first. Regime-aware. Cross-asset.",
+        structure="""1. EXECUTIVE SUMMARY — 2-3 sentences, top-line market read
+2. MACRO CROSS-ASSET — DXY, TNX, VIX, gold, oil — how they flow into equities
+3. REGIME CHECK — bull/bear/transition/range-bound for each major index
+4. SECTOR ROTATION — which factors are winning (momentum, value, low vol)
+5. NAME ANALYSIS — 2-3 names with technicals, catalysts, risk
+6. FACTOR WATCH — YTD factor performance, momentum vs reversal
+7. RISK MONITOR — VaR shifts, correlation changes, vol regimes
+8. WATCHLIST — concrete levels and catalysts for the next 48h""",
+        tone_guide="Punchy, professional, institutional register. Short paragraphs. Mix of macro and micro. Every sentence has a number. 'We expect...' language.",
+        analytical_focus="Cross-asset correlations, factor performance, regime transitions, VaR-adjusted positioning. Uses composite score and regime classification as backbone.",
+        sample_topics=[
+            "US equity factor book",
+            "Risk-on/risk-off regime check",
+            "Sector rotation watch",
+        ],
+    ),
+    "trade_read": Persona(
+        id="trade_read",
+        name="Trade Read (futu niu niu top KOL)",
+        tagline="Position-level. Entry + Stop + Target. No fluff.",
+        structure="""Cover 2-4 setups across different markets. Each setup answers:
+──────── Setup N: [BIAS] [TICKER]
+Thesis: catalyst or pattern in 2 sentences
+Entry: specific price zone
+Stop: invalidation level with rationale
+Target: take-profit with rationale
+R:R: calculated ratio
+Conviction: high / medium / low
+Timeframe: days / weeks
+
+Only publish setups you'd trade yourself. If a setup doesn't have clean levels, skip it.""",
+        tone_guide="No intro, no macro preamble. Jump straight to the setups. Trader-to-trader directness. 'I'm entering SPY long here because...'",
+        analytical_focus="S/R levels, ATR-based stop placement, breakout confirmation, volume divergence, momentum regime. Uses S/R detection + R:R from factor engine.",
+        sample_topics=["Trade setups across US + HK + crypto", "Momentum plays for this week"],
+    ),
+    "onchain": Persona(
+        id="onchain",
+        name="On-Chain Detective (crypto-native analyst)",
+        tagline="Whales. Flows. Exchange balances. The tape tells the real story.",
+        structure="""1. CHAIN STATE — Network fundamentals (active addresses, tx count, fees)
+2. EXCHANGE FLOWS — BTC/ETH in/out of exchanges, stablecoin supply
+3. WHALE WATCH — large transactions, accumulation/distribution patterns
+4. BASIS & FUNDING — perpetual basis, funding rates, OI changes
+5. CVM (CURRENT VALUE MULTIPLE) — MVRV, SOPR, NUPL regime
+6. TOP ALTS — 2-3 altcoins with on-chain reads
+7. LIQUIDATION CLUSTERS — where the pin action is
+8. STRATEGY — positioning based on on-chain regime""",
+        tone_guide="Crypto-native. References on-chain metrics naturally. 'Whales are moving...', 'Exchange balances suggest...', 'Funding flipped negative...'",
+        analytical_focus="Exchange net flows, stablecoin supply ratio, liquidation heatmaps, funding rate divergence, MVRV Z-score approximation using price vs on-chain cost basis.",
+        sample_topics=[
+            "Bitcoin on-chain health check",
+            "Alt season probability from chain data",
+            "Whale accumulation zones",
+        ],
+    ),
+    "options_greeks": Persona(
+        id="options_greeks",
+        name="Options Greeks (derivatives desk view)",
+        tagline="Vol surface. Gamma. Skew. The real flow.",
+        structure="""1. VOL LANDSCAPE — VIX regime, term structure, vol of vol
+2. GAMMA PROFILE — dealer gamma positioning, pin risk
+3. SKEW — puts vs calls, tail risk premium, kurtosis regime
+4. OPEN INTEREST — notable large positions, max pain
+5. PUT/CALL RATIO — institutional vs retail
+6. VOL TRADE IDEAS — long vol / short vol with specific strikes
+7. RISK REVERSALS — what the options market is pricing""",
+        tone_guide="Derivatives desk. Concrete strikes and expiries. 'Dealers are long gamma into this week's OPEX...'",
+        analytical_focus="Vol regime (from factor engine), kurtosis/skew for tail risk, VaR/CVaR. Implied vol approximations from price action.",
+        sample_topics=[
+            "Options market positioning pre-earnings",
+            "VIX term structure and hedging flows",
+            "Gamma squeeze probability",
+        ],
+    ),
+    "narrative_trader": Persona(
+        id="narrative_trader",
+        name="Narrative Trader (catalyst/story-driven)",
+        tagline="Themes drive flows. Flows drive prices. Stories drive multiples.",
+        structure="""1. THE BIG THEME — the single most important narrative this cycle
+2. SECTOR THEME MAP — which sectors/stories are gaining/losing traction
+3. NAME-SPECIFIC CATALYSTS — earnings, product launches, regulatory events
+4. NARRATIVE MOMENTUM — which stories are accelerating, which are fading
+5. SENTIMENT CHECK — social volume, KOL mentions, fear/greed regime
+6. POSITIONING — how to play the theme (direct, derivative, related names)
+7. ANTITHESIS — what breaks the narrative""",
+        tone_guide="Story-first but data-backed. 'The AI theme is rotating from infrastructure to application...' Connects macro trends to specific trade ideas.",
+        analytical_focus="Momentum regime, trend strength (ADX), price distance from MAs. ROC acceleration/deceleration. Volume confirmation.",
+        sample_topics=[
+            "AI infrastructure to application rotation",
+            "China reopening vs deglobalization",
+            "Crypto regulatory catalyst timeline",
+        ],
+    ),
+    "risk_parity": Persona(
+        id="risk_parity",
+        name="Risk Parity (portfolio construction lens)",
+        tagline="Correlation breaks portfolios. Risk parity keeps them together.",
+        structure="""1. PORTFOLIO RISK DECOMPOSITION — which positions are driving P&L variance
+2. CORRELATION ALERT — rolling correlations breaking multi-month ranges
+3. VOL BUDGET — where's the risk budget best allocated
+4. DRAWDOWN SCENARIOS — tail events that could trigger 5%+ drawdown
+5. REBALANCE SIGNALS — which positions need trimming/adding
+6. HEDGE IDEAS — cost-efficient tail hedges for the current regime
+7. POSITION SIZING — Kelly fraction, risk parity weights""",
+        tone_guide="Calm, systematic, PM-level. Focus on portfolio-level not single-name. 'ATR-based sizing suggests...', 'Correlation regime has shifted...'",
+        analytical_focus="Beta to SPY, correlation matrix, Sharpe/Sortino/Calmar ratios, VaR/CVaR, max drawdown. Portfolio-level risk decomposition.",
+        sample_topics=[
+            "Portfolio rebalance for low-vol regime",
+            "Correlation breakdown alert",
+            "Tail risk hedging ideas",
+        ],
+    ),
+    "morning_call": Persona(
+        id="morning_call",
+        name="Morning Call (3-min video script)",
+        tagline="3 minutes. 3 ideas. Go.",
+        structure="""[TITLE — must fit in a Twitter card / video thumbnail]
+
+[HOOK — 1 sentence, spoken as the camera opens]
+
+1. MACRO READ — what moved overnight, why it matters (20 seconds)
+2. FIRST PLAY — the best setup right now (40 seconds)
+3. SECOND PLAY — the contrarian idea (40 seconds)
+4. RISK — what keeps me up (20 seconds)
+5. CLOSE — call to action, one sentence (10 seconds)
+
+TOTAL: ~3 minutes / ~500 words spoken
+
+Format notes: Write for the ear, not the page. Short sentences. Natural rhythm.
+Include timestamps: [0:15], [0:45], etc.""",
+        tone_guide="Spoken word. Natural. 'Hey team, three things before the open...' Video-aware format with timestamps.",
+        analytical_focus="Most actionable data points. Key levels, volatility regime, overnight gaps.",
+        sample_topics=["Pre-market call: what changed overnight", "3-minute crypto daily"],
+    ),
+    "data_snapshot": Persona(
+        id="data_snapshot",
+        name="Data Snapshot (pure data, no LLM)",
+        tagline="Facts only. The numbers do the talking.",
+        structure="""This format generates a structured data output WITHOUT LLM synthesis.
+The data is formatted and returned directly.
+
+## DATA SNAPSHOT — {DATE}
+---
+
+### Market Overview
+| Ticker | Price | 1d% | 7d% | 30d% | RSI | ADX | Regime | Score |
+
+### Factor Matrix Top Movers (by composite score)
+[top 5 strongest, bottom 5 weakest]
+
+### Macro Check
+| Name | Value | 30d% |
+
+### Sector Rotation
+Direction: ...
+Top/Bottom: ...
+
+### Volatility Leaders
+| Ticker | HV 20d% | Regime | DD 30d |
+
+### Trade Read Highlights
+| Ticker | Bias | Conviction | Entry | Stop | Target | R:R |
+""",
+        tone_guide="No LLM generation. Strictly formatted tables from computed data. Human-readable Markdown.",
+        analytical_focus="Pure data extraction and formatting. All quantitative.",
+        sample_topics=[],
+    ),
+}
+
+
+class ResearchNoteWriter:
+    """Multi-persona research note generator. US + HK + crypto."""
+
     TICKER_NAMES = {
         "SPY": "S&P 500",
         "QQQ": "Nasdaq 100",
@@ -56,6 +273,9 @@ class ResearchNoteWriter:
         "META": "Meta",
         "TSLA": "Tesla",
         "AVGO": "Broadcom",
+        "ORCL": "Oracle",
+        "CRM": "Salesforce",
+        "NOW": "ServiceNow",
         "JPM": "JPMorgan",
         "GS": "Goldman Sachs",
         "BAC": "Bank of America",
@@ -66,6 +286,9 @@ class ResearchNoteWriter:
         "JNJ": "Johnson & Johnson",
         "XOM": "Exxon Mobil",
         "CVX": "Chevron",
+        "WMT": "Walmart",
+        "COST": "Costco",
+        "PG": "Procter & Gamble",
         "AMD": "AMD",
         "INTC": "Intel",
         "QCOM": "Qualcomm",
@@ -87,6 +310,14 @@ class ResearchNoteWriter:
         "ETH/USDT": "Ethereum",
         "SOL/USDT": "Solana",
         "XRP/USDT": "XRP",
+        "DOGE/USDT": "Dogecoin",
+        "ADA/USDT": "Cardano",
+        "AVAX/USDT": "Avalanche",
+        "LINK/USDT": "Chainlink",
+        "DOT/USDT": "Polkadot",
+        "MATIC/USDT": "Polygon",
+        "NEAR/USDT": "NEAR Protocol",
+        "ARB/USDT": "Arbitrum",
     }
 
     def __init__(self, model: Optional[str] = None, api_key: Optional[str] = None):
@@ -106,11 +337,13 @@ class ResearchNoteWriter:
     def _name(self, sym: str) -> str:
         return self.TICKER_NAMES.get(sym, sym)
 
+    def list_personas(self) -> Dict[str, str]:
+        """List all available personas with name + tagline."""
+        return {pid: f"{p.name} — {p.tagline}" for pid, p in PERSONAS.items()}
+
     # ── Data Collection ───────────────────────────────────────────
 
     def gather(self, include_hk: bool = True, include_crypto: bool = True) -> "ResearchNoteWriter":
-        """Collect data from all configured markets."""
-        # ── US Equities ──
         us_dfs = fetch_ohlcv(DEFAULT_US_WATCHLIST, market="us_equity", days=365)
         self.price_snapshots = price_snapshots(us_dfs, market="us_equity")
         spy_df = us_dfs.get("SPY")
@@ -121,7 +354,6 @@ class ResearchNoteWriter:
                     df, sym, market="us_equity", benchmark_df=spy_df
                 )
 
-        # ── HK Equities ──
         if include_hk:
             hk_dfs = fetch_ohlcv(DEFAULT_HK_WATCHLIST, market="hk_equity", days=365)
             self.hk_snapshots = price_snapshots(hk_dfs, market="hk_equity")
@@ -137,7 +369,6 @@ class ResearchNoteWriter:
                         use_short_ma="HSI" not in sym,
                     )
 
-        # ── Crypto ──
         if include_crypto:
             crypto_dfs = fetch_crypto_ohlcv(DEFAULT_CRYPTO_WATCHLIST, days=365)
             self.crypto_snapshots = price_snapshots(crypto_dfs, market="crypto")
@@ -149,7 +380,6 @@ class ResearchNoteWriter:
                         df, sym, market="crypto", benchmark_df=btc_df, use_short_ma=True
                     )
 
-        # ── Macro & Sector & News ──
         macro_dfs = fetch_macro(days=60)
         for sym, df in macro_dfs.items():
             if not df.empty:
@@ -164,39 +394,15 @@ class ResearchNoteWriter:
         sector_dfs = fetch_sectors(days=60)
         self.sector_rotation = analyze_sector_rotation(sector_dfs)
         self.headlines = collect_headlines(max_per_source=3)
-
         return self
 
     # ── Quant Context Builder ─────────────────────────────────────
-
-    def _build_macro_block(self) -> str:
-        lines = ["### Macro Cross-Asset"]
-        for name, data in self.macro_data.items():
-            lines.append(f"- {name}: {data['price']:.2f} (30d: {data['change_30d']:+.2f}%)")
-        lines.append("")
-        return "\n".join(lines)
-
-    def _build_sector_block(self) -> str:
-        if not self.sector_rotation:
-            return ""
-        sr = self.sector_rotation
-        lines = [
-            "### Sector Rotation",
-            f"Direction: {sr.rotation_direction}",
-            f"Top 3: {', '.join(sr.top_3)}",
-            f"Bottom 3: {', '.join(sr.bottom_3)}",
-            "Rankings:",
-        ]
-        for ticker, name, ret, regime in sr.ranking[:8]:
-            lines.append(f"  {ticker} ({name}): {ret:+.2f}% [{regime}]")
-        lines.append("")
-        return "\n".join(lines)
 
     def _build_matrix_block(
         self,
         matrices: Dict[str, FactorMatrix],
         snapshots: Dict[str, PriceSnapshot],
-        max_count: int = 15,
+        max_count: int = 12,
     ) -> str:
         lines = []
         for sym in list(matrices.keys())[:max_count]:
@@ -204,232 +410,60 @@ class ResearchNoteWriter:
             snap = snapshots.get(sym)
             if not snap:
                 continue
-            lines.append(f"\n#### {sym} ({self._name(sym)})")
+            t, v, r = m.technical, m.volatility, m.risk
             lines.append(
-                f"Price: {snap.current_price:.2f} | 1d: {snap.change_1d_pct:+.2f}% | 7d: {snap.change_7d_pct:+.2f}% | 30d: {snap.change_30d_pct:+.2f}%"
+                f"{sym}|{snap.current_price:.2f}|{snap.change_1d_pct:+.2f}%|{snap.change_7d_pct:+.2f}%|{snap.change_30d_pct:+.2f}%|{t.rsi_14:.1f}|{t.adx:.1f}|{t.trend_direction}|{m.regime}|{m.composite_score:.1f}|{v.historical_vol_20d:.0f}%|{v.vol_regime}|{v.max_drawdown_30d:.1f}%|{r.sharpe_ratio_30d:.2f}|{r.var_95_1d:.2f}%|{r.beta_to_spy:.2f}|{m.trade_bias}|{m.conviction}|{m.stop_loss_level:.2f}|{m.target_level:.2f}|{m.risk_reward_ratio:.2f}"
             )
-            lines.append(f"30d Range: {snap.low_30d:.2f} - {snap.high_30d:.2f}")
-
-            t = m.technical
-            lines.append(
-                f"Tech: RSI={t.rsi_14:.1f} | ADX={t.adx:.1f} ({t.trend_strength} {t.trend_direction}) | MACD Hist={t.macd_histogram:+.4f}"
-            )
-            lines.append(
-                f"  ROC 5d={t.roc_5d:+.2f}% | ROC 20d={t.roc_20d:+.2f}% | Momentum={t.momentum_regime}"
-            )
-            lines.append(
-                f"  MA50={t.distance_to_ma50_pct:+.2f}% | MA200={t.distance_to_ma200_pct:+.2f}% | Z={t.z_score:+.2f}"
-            )
-            lines.append(
-                f"  BB Width={t.bb_width_pct:.1f}% | OBV={t.obv_trend} | Vol Ratio={t.volume_ratio_vs_20d:.1f}x"
-            )
-            lines.append(
-                f"  S={t.nearest_support:.2f} ({t.distance_to_support_pct:.1f}%) | R={t.nearest_resistance:.2f} ({t.distance_to_resistance_pct:.1f}%)"
-            )
-
-            v = m.volatility
-            lines.append(
-                f"Vol: ATR={v.atr_pct:.1f}% | HV 20d={v.historical_vol_20d:.0f}% | Regime={v.vol_regime} | DD 30d={v.max_drawdown_30d:.1f}%"
-            )
-
-            r = m.risk
-            lines.append(
-                f"Risk: Sharpe={r.sharpe_ratio_30d:.2f} | VaR={r.var_95_1d:.2f}% | Skew={r.skewness_20d:+.2f} | Kurt={r.kurtosis_20d:.2f}"
-            )
-
-            lines.append(
-                f"Regime: {m.regime.upper()} | Score: {m.composite_score:.1f}/100 | Bias: {m.trade_bias} ({m.conviction})"
-            )
-            if m.stop_loss_level > 0:
-                lines.append(
-                    f"  Trade Read: Entry={snap.current_price:.2f} | Stop={m.stop_loss_level:.2f} | Target={m.target_level:.2f} | R:R={m.risk_reward_ratio:.2f}"
-                )
-            if m.key_observation:
-                lines.append(f"  Hook: {m.key_observation}")
-            if m.risk_warning:
-                lines.append(f"  Risk: {m.risk_warning}")
         return "\n".join(lines)
 
     def _build_quant_context_block(
         self,
-        include_macro: bool = True,
-        include_sectors: bool = True,
-        include_us: bool = True,
-        include_hk: bool = True,
-        include_crypto: bool = True,
     ) -> str:
         parts = ["## QUANTITATIVE CONTEXT"]
 
-        # Market overview — SPY
-        spy = self.price_snapshots.get("SPY")
-        spy_mat = self.factor_matrices.get("SPY")
-        if spy:
-            parts.append("\n### US Market Overview")
+        # Macro
+        parts.append("\n### MACRO")
+        for name, data in self.macro_data.items():
+            parts.append(f"{name}: {data['price']:.2f} (30d: {data['change_30d']:+.2f}%)")
+
+        # Sector
+        if self.sector_rotation:
+            sr = self.sector_rotation
             parts.append(
-                f"SPY: {spy.current_price:.2f} (1d: {spy.change_1d_pct:+.2f}% | 30d: {spy.change_30d_pct:+.2f}%)"
+                f"\n### SECTOR ROTATION\nDirection: {sr.rotation_direction}\nTop: {', '.join(sr.top_3)}\nBottom: {', '.join(sr.bottom_3)}"
             )
-            if spy_mat:
-                parts.append(
-                    f"Regime: {spy_mat.regime.upper()} | Score: {spy_mat.composite_score:.1f} | ADX: {spy_mat.technical.adx:.1f} | Vol: {spy_mat.volatility.historical_vol_20d:.0f}% ann"
-                )
+            for t, n, r_, reg in sr.ranking[:6]:
+                parts.append(f"{t} ({n}): {r_:+.2f}% [{reg}]")
 
-        if include_macro and self.macro_data:
-            parts.append("")
-            parts.append(self._build_macro_block())
+        # Markets
+        headers = [
+            "sym|price|1d|7d|30d|RSI|ADX|trend|regime|score|HV20d|volReg|DD30d|Sharpe|VaR95|beta|bias|conv|stop|tgt|RR"
+        ]
+        for label, matrices, snapshots in [
+            ("US", self.factor_matrices, self.price_snapshots),
+            ("HK", self.hk_matrices, self.hk_snapshots),
+            ("CRYPTO", self.crypto_matrices, self.crypto_snapshots),
+        ]:
+            block = self._build_matrix_block(matrices, snapshots)
+            if block.strip():
+                parts.append(f"\n### {label}")
+                parts.extend(headers)
+                parts.append(block)
 
-        if include_sectors and self.sector_rotation:
-            parts.append(self._build_sector_block())
-
-        if include_us and self.factor_matrices:
-            parts.append("### US Equity Factor Matrices")
-            parts.append(self._build_matrix_block(self.factor_matrices, self.price_snapshots))
-
-        if include_hk and self.hk_matrices:
-            parts.append("\n### HK Equity Factor Matrices")
-            parts.append(self._build_matrix_block(self.hk_matrices, self.hk_snapshots))
-
-        if include_crypto and self.crypto_matrices:
-            parts.append("\n### Crypto Factor Matrices")
-            parts.append(self._build_matrix_block(self.crypto_matrices, self.crypto_snapshots))
-
+        # News
         if self.headlines:
-            parts.append("\n### Live News")
-            for h in self.headlines[:12]:
+            parts.append("\n### NEWS")
+            for h in self.headlines[:8]:
                 src = h.source.split("/")[2] if "//" in h.source else h.source
-                parts.append(f"- [{h.published.strftime('%H:%M')}] [{src}] {h.title}")
+                parts.append(f"[{h.published.strftime('%H:%M')}] [{src}] {h.title}")
 
         return "\n".join(parts)
 
-    # ── Prompt Builder ────────────────────────────────────────────
-
-    def _build_prompt(self, topic: str, style: str, include_quant: bool = True) -> str:
-        quant = self._build_quant_context_block() if include_quant else ""
-
-        anchors = self._get_style_anchor(style)
-
-        prompt = f"""You are a veteran sell-side strategist writing today's research note.
-
-DATE: {self.note_date}
-TOPIC: {topic}
-STYLE: {style}
-
-{anchors}
-
-### RAW QUANTITATIVE DATA
-
-{quant}
-
-### WRITING RULES (NON-NEGOTIABLE)
-
-1. Follow the structure in the style anchor exactly.
-2. Every claim references a specific number from the data.
-3. Active voice, decisive tone. "We expect..." / "The data argues..." / "We are watching..."
-4. No hedging. "The pattern is clear" > "It could be interpreted."
-5. Zero AI-sounding language. No "Based on the data provided", "As an AI", "In the context of".
-6. Mix macro, sectors, and specific names. Tell a coherent story.
-7. Include 3-5 "What we are watching" bullets at the end with concrete prices/dates.
-8. Closing paragraph: "Bottom line" with clear positioning view.
-9. Title must be newsstand-worthy: generates curiosity, telegraphs the view.
-
-Output ONLY the article. Title first. Sections separated by blank lines. No preamble. No "Here is your note". Just the publication-ready text."""
-
-        return prompt
-
-    def _get_style_anchor(self, style: str) -> str:
-        anchors = {
-            "daily": """STYLE: DAILY BRIEFING (sell-side equivalent: JPM Morning Note / Goldman Top of Mind)
-
-Structure:
-1. EXECUTIVE SUMMARY — 2-3 sentences, top-line market read
-2. MACRO & CROSS-ASSET — treasury vol, USD, VIX, gold, oil — how they impact equities/crypto
-3. SECTOR ROTATION WATCH — which sectors are leading, which lagging, what it tells us
-4. THE TRADE — deep dive on 2-3 specific names with catalyst, entry levels
-5. RISK WATCH — vol regimes, correlation shifts, specific risk events
-6. POSITIONING / TRADE IDEAS — actionable, directional
-7. WATCHLIST — 3-5 specific levels, dates, or catalysts
-
-Tone: Punchy. Professional. Mix of macro and micro. Every paragraph has a number.
-
----
-
-""",
-            "trade_read": """STYLE: TRADE READ (institutional / top futu niu niu KOL style)
-
-Focus on specific trade setups with entry, stop, target, conviction. Each setup must answer:
-1. WHY THIS TRADE — thesis in 2 sentences (what catalyst, what pattern, what data)
-2. ENTRY — specific price level or zone
-3. STOP LOSS — invalidation level with rationale
-4. TARGET — take-profit level with rationale
-5. RISK / REWARD — ratio calculation
-6. CONVICTION — high / medium / low and why
-7. TIMEFRAME — days / weeks / months
-
-Cover 2-4 setups across different markets (US + HK + crypto if data available).
-If a setup doesn't have clean levels, skip it. Only publish setups you'd trade yourself.
-
-Structure per setup:
-```
-──────── Setup 1: [BIAS] [TICKER]
-Thesis: ...
-Entry: ...
-Stop: ...
-Target: ...
-R:R: ...
-Conviction: ...
-```
-
----
-
-""",
-            "kol_daily": """STYLE: KOL DAILY BRIEF (top trading community KOL — Twitter / futu niu niu / webull)
-
-This reads like a trader posting to their 50k followers. Opinionated. Punchy. 
-Mix of morning market read + 2-3 specific setups + risk awareness + a "big picture" thought.
-
-Structure:
-1. MARKET READ — "The tape tells me..." (macro + vol + regime in 3-4 sentences)
-2. WHAT I'M WATCHING — 2-3 specific names with quick technical read
-3. ACTIVE SETUPS — brief trade reads (entry, stop, target in 1 line each)
-4. RISK MANAGEMENT — "What keeps me up" — specific risks being managed
-5. BIG PICTURE — one paragraph about a structural trend / regime change / macro risk
-6. TODAY'S PLAN — what the writer is actually doing (adding, trimming, sitting)
-
-Tone: Confident. First-person ("I'm watching..."). Numbers in every claim.
-Trader personality: disciplined, data-driven, risk-aware.
-
----
-
-""",
-            "weekly": """STYLE: WEEKLY DEEP DIVE (sell-side weekly / institutional)
-
-Structure:
-1. MACRO VIEW — big picture regime, factor performance YTD
-2. SECTOR ROTATION ANALYSIS — who's leading/lagging, narrative behind flows
-3. NAME OF THE WEEK — deep dive: financials, narrative, technicals, catalyst
-4. FACTOR WATCH — which factors worked: momentum, value, quality, low vol
-5. VOL & LIQUIDITY REVIEW — vol surface, gamma, options tells
-6. POSITIONING SUGGESTIONS — tactical and strategic
-7. CATALYST CALENDAR — key events next week
-
----
-
-""",
-            "sector_rotation": """STYLE: SECTOR ROTATION NOTE
-
-Focus on cross-sectional relative strength, factor exposure within sectors.
-Use RRG-chart language. "Technology is leading but rotating from growth to value within the sector."
-
----
-""",
-        }
-        return anchors.get(style, anchors["daily"])
-
-    # ── LLM Call ──────────────────────────────────────────────────
+    # ── LLM Dispatch ──────────────────────────────────────────────
 
     def _call_llm(self, prompt: str) -> str:
         if not self.model.startswith("deepseek/"):
             return f"[LLM not configured for model: {self.model}]"
-
         import requests
 
         resp = requests.post(
@@ -437,18 +471,7 @@ Use RRG-chart language. "Technology is leading but rotating from growth to value
             headers={"Authorization": f"Bearer {self.api_key}"},
             json={
                 "model": self.model.replace("deepseek/", ""),
-                "messages": [
-                    {
-                        "role": "system",
-                        "content": (
-                            "You write sell-side research notes for institutional investors. "
-                            "Your prose is measured, data-driven, and opinionated. "
-                            "You never write like an AI. Short paragraphs. Crisp sentences. "
-                            "Specific numbers. No empty phrases."
-                        ),
-                    },
-                    {"role": "user", "content": prompt},
-                ],
+                "messages": [{"role": "user", "content": prompt}],
                 "temperature": 0.65,
                 "max_tokens": 4096,
             },
@@ -457,34 +480,110 @@ Use RRG-chart language. "Technology is leading but rotating from growth to value
         resp.raise_for_status()
         return resp.json()["choices"][0]["message"]["content"]
 
-    # ── Public API ────────────────────────────────────────────────
+    # ── Generate ──────────────────────────────────────────────────
 
-    def publish(
-        self,
-        topic: str = "Global markets review",
-        style: str = "daily",
-        include_quant: bool = True,
-        **kwargs,
-    ) -> str:
-        """Generate a publishable research note."""
-        self.gather(**kwargs)
-        prompt = self._build_prompt(topic, style, include_quant=include_quant)
+    def _generate(self, persona: Persona, topic: str) -> str:
+        """Core generate — builds prompt from persona definition + quant data."""
+        quant = self._build_quant_context_block()
+
+        prompt = f"""{persona.system_prompt()}
+
+DATE: {self.note_date}
+TOPIC: {topic}
+
+### RAW QUANTITATIVE DATA
+
+{quant}
+
+Now write the note.
+"""
+
         return self._call_llm(prompt)
 
-    def daily_brief(self, topic: str = "US + HK + crypto market review") -> str:
-        """Quick daily brief across all markets."""
-        return self.publish(topic=topic, style="daily")
+    def publish(self, persona_id: str = "macro_quant", topic: str = "", **kwargs) -> str:
+        """Generate a research note with a specific persona.
 
-    def trade_read(self, topic: str = "Trade setups across US + HK + crypto") -> str:
-        """Position-level trade write-ups."""
-        return self.publish(topic=topic, style="trade_read")
+        Args:
+            persona_id: one of macro_quant, trade_read, onchain, options_greeks,
+                       narrative_trader, risk_parity, morning_call, data_snapshot
+            topic: custom topic override
+        """
+        persona = PERSONAS.get(persona_id)
+        if not persona:
+            available = ", ".join(PERSONAS.keys())
+            raise ValueError(f"Unknown persona '{persona_id}'. Available: {available}")
 
-    def kol_daily(self, topic: str = "Trader's morning brief across HK, US, and crypto") -> str:
-        """KOL-style daily brief."""
-        return self.publish(topic=topic, style="kol_daily")
+        # Data snapshot skips LLM entirely
+        if persona_id == "data_snapshot":
+            return self._data_snapshot()
 
-    def weekly_note(self) -> str:
-        """Full weekly deep dive."""
-        return self.publish(
-            topic="Weekly factor book and sector rotation deep dive", style="weekly"
-        )
+        self.gather(**kwargs)
+        default_topics = {
+            "macro_quant": "US equity factor book, regime check, sector rotation",
+            "trade_read": "Trade setups across US + HK + crypto",
+            "onchain": "Bitcoin and altcoin on-chain health check",
+            "options_greeks": "Options market positioning and vol surface",
+            "narrative_trader": "Thematic rotation and catalyst watch",
+            "risk_parity": "Portfolio risk decomposition and correlation alert",
+            "morning_call": "Pre-market briefing — what changed overnight",
+        }
+        resolved_topic = topic or default_topics.get(persona_id, "Market review")
+        return self._generate(persona, resolved_topic)
+
+    def _data_snapshot(self) -> str:
+        """Generate pure data snapshot without LLM."""
+        self.gather()
+        lines = [f"## DATA SNAPSHOT — {self.note_date}", "---", ""]
+
+        # Market overview table
+        lines.append("### Market Overview")
+        lines.append("| Ticker | Price | 1d% | 7d% | 30d% | RSI | ADX | Regime | Score |")
+        lines.append("|--------|-------|-----|-----|------|-----|-----|--------|-------|")
+        for sym in ["SPY", "QQQ", "IWM"]:
+            m = self.factor_matrices.get(sym)
+            snap = self.price_snapshots.get(sym)
+            if m and snap:
+                lines.append(
+                    f"| {sym} | {snap.current_price:.2f} | {snap.change_1d_pct:+.2f}% | {snap.change_7d_pct:+.2f}% | {snap.change_30d_pct:+.2f}% | {m.technical.rsi_14:.1f} | {m.technical.adx:.1f} | {m.regime} | {m.composite_score:.1f} |"
+                )
+        lines.append("")
+
+        # Macro
+        lines.append("### Macro")
+        lines.append("| Name | Value | 30d% |")
+        lines.append("|------|-------|------|")
+        for name, data in self.macro_data.items():
+            lines.append(f"| {name} | {data['price']:.2f} | {data['change_30d']:+.2f}% |")
+        lines.append("")
+
+        # Score rankings
+        lines.append("### Factor Score Rankings")
+        all_scores = [
+            (sym, m.composite_score, m.regime, m.trade_bias)
+            for sym, m in self.factor_matrices.items()
+        ]
+        all_scores.sort(key=lambda x: x[1], reverse=True)
+        top5 = all_scores[:5]
+        bot5 = all_scores[-5:]
+        lines.append("**Strongest 5:**")
+        for sym, score, reg, bias in top5:
+            lines.append(f"- {self._name(sym)} ({sym}): {score:.1f} [{reg}] [{bias}]")
+        lines.append("**Weakest 5:**")
+        for sym, score, reg, bias in bot5:
+            lines.append(f"- {self._name(sym)} ({sym}): {score:.1f} [{reg}] [{bias}]")
+        lines.append("")
+
+        # Trade Read highlights
+        lines.append("### Trade Read Highlights")
+        lines.append("| Ticker | Bias | Conviction | Entry | Stop | Target | R:R |")
+        lines.append("|--------|------|------------|-------|------|--------|-----|")
+        biased = [(sym, m) for sym, m in self.factor_matrices.items() if m.trade_bias != "neutral"]
+        for sym, m in biased[:8]:
+            snap = self.price_snapshots.get(sym)
+            if snap and m.stop_loss_level > 0:
+                lines.append(
+                    f"| {sym} | {m.trade_bias} | {m.conviction} | {snap.current_price:.2f} | {m.stop_loss_level:.2f} | {m.target_level:.2f} | {m.risk_reward_ratio:.2f} |"
+                )
+        lines.append("")
+
+        return "\n".join(lines)
