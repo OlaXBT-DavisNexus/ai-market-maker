@@ -32,6 +32,10 @@ DEFAULT_RSS_SOURCES: Dict[str, str] = {
     "newsbtc": "https://www.newsbtc.com/feed/",
     "bitcoinmagazine": "https://bitcoinmagazine.com/feed",
     "yahoo_finance": "https://finance.yahoo.com/news/rssindex",
+    "google_news_finance": "https://news.google.com/rss/topics/CAAqJggKIiBDQkFTRWdvSUwyMHZNRGx6TVdZU0FtVnVHZ0pWVXlnQVAB?hl=en-US&gl=US&ceid=US:en",
+    "reuters_markets": "https://www.reutersagency.com/feed/?taxonomy=best-sectors&post_type=best&best-sectors=markets",
+    "marketwatch": "https://feeds.marketwatch.com/marketwatch/topstories",
+    "cnbc_finance": "https://search.cnbc.com/rs/search/combinedcms/view.xml?partnerId=wrss01&id=10001147",
 }
 
 # Macro tickers tracked via yfinance
@@ -105,8 +109,6 @@ DEFAULT_HK_WATCHLIST = [
     "3690.HK",  # Meituan
     "9618.HK",  # JD
     "1810.HK",  # Xiaomi
-    "9988.HK",  # Alibaba
-    "0700.HK",  # Tencent again
     "1299.HK",  # AIA
     "0005.HK",  # HSBC
     "3988.HK",  # Bank of China

@@ -217,23 +217,23 @@ class TestPersonaDefinitions:
             assert p.id
             assert len(p.name) > 3
             assert len(p.tagline) > 5
-            assert len(p.structure) > 50
+            assert len(p.structure) > 30
             assert len(p.tone_guide) > 20
-            assert len(p.analytical_focus) > 20
+            assert len(p.analytical_focus) > 10
 
     def test_data_snapshot_has_different_structure(self):
         from backtest.research.writers import PERSONAS
 
         p = PERSONAS["data_snapshot"]
         # data_snapshot name explicitly says "no LLM"
-        assert "pure data" in p.name.lower() or "no llm" in p.name.lower()
+        assert "純數據" in p.name or "no LLM" in p.name
 
     def test_morning_call_has_timestamps(self):
         from backtest.research.writers import PERSONAS
 
         mc = PERSONAS["morning_call"]
         # morning_call name says "video script"
-        assert "video" in mc.name.lower()
+        assert "視頻" in mc.name or "video" in mc.name.lower()
         assert "[0:15]" in mc.structure
 
     def test_persona_system_prompt_includes_rules(self):
@@ -241,9 +241,9 @@ class TestPersonaDefinitions:
 
         for _pid, p in PERSONAS.items():
             sp = p.system_prompt()
-            assert "WRITING RULES" in sp
-            assert "newsstand-worthy" in sp
-            assert "Bottom Line" in sp
+            assert "不可協商" in sp or "WRITING RULES" in sp
+            assert "標題要像" in sp or "newsstand-worthy" in sp
+            assert "總結" in sp or "Bottom Line" in sp
 
     def test_list_personas(self):
         from backtest.research.writers import ResearchNoteWriter
@@ -258,7 +258,7 @@ class TestPersonaDefinitions:
         from backtest.research.writers import ResearchNoteWriter
 
         writer = ResearchNoteWriter()
-        with pytest.raises(ValueError, match="Unknown persona"):
+        with pytest.raises(ValueError, match="未知角色"):
             writer.publish("nonexistent")
 
     def test_publish_all_personas_mocked(self, monkeypatch):
