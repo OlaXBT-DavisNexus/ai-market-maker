@@ -74,8 +74,13 @@ This directory documents every persona node in the OlaXBT multi-agent hedge fund
 | 14 | `14_signal_arbitrator.md` | n13 | signal_arbitrator | Node function | Final arbitrator |
 | 15 | `15_portfolio_proposal.md` | n14 | portfolio_proposal | Node function | Allocation |
 | 16 | `16_risk_guard.md` | n15 | risk_guard | Agent class | Veto authority |
-| 17 | `17_execution_desk.md` | n16 | portfolio_execute | Node function | CCXT order generation |
-| 18 | `18_audit_logger.md` | n17 | audit | Log function | Event persistence |
+| 17 | `17_portfolio_execute.md` | n16 | portfolio_execute | Node function | CCXT order generation |
+
+## Non-Agent Node
+
+| # | File | Node | Actor | Type | Role |
+|---|------|------|-------|------|------|
+| — | (no doc) | n17 | audit | Log function | Event persistence (not an agent) |
 
 ## Key Distinctions
 

@@ -1,6 +1,6 @@
 # Node: Execution Desk (Broker — Order Generation / 執行交易檯)
 
-> **This is a LangGraph node function (`portfolio_execute`), not a standalone agent class.**
+> **This is a LangGraph node function (`portfolio_execute` / n16), not a standalone agent class.**
 > The actual order routing uses `trading.policy_manager.TradingPolicyManager` + `ccxt`.
 
 ## Position
