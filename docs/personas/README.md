@@ -74,4 +74,4 @@ This directory documents every agent persona in the OlaXBT multi-agent hedge fun
 | 15 | `15_portfolio_proposal.md` | n14 | portfolio_proposal | Allocation |
 | 16 | `16_risk_guard.md` | n15 | risk_guard | Governance: Veto |
 | 17 | `17_execution_desk.md` | n16 | portfolio_execute | Broker |
-| 18 | `18_audit_logger.md` | n17 | audit | Observability |
+| 18 | `18_audit_logger.md` | n17 | audit | Log Step (not an agent) |

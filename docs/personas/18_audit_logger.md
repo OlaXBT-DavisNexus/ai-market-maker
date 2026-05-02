@@ -1,19 +1,21 @@
-# Persona: Audit Logger (Observer / 審計記錄器)
+# Node: Audit Logger (Log / 審計記錄站)
+
+> **This is NOT an agent.** It is a stateless log step that runs at the end of every workflow cycle.
 
 ## Position
-Observability layer — the system's black box recorder.
+The last node in the workflow graph. Persists run outcome to memory.
 
-## Goals
-- Record every agent decision, signal, proposal, and execution in a structured audit trail.
-- Provide replay capability for post-mortem analysis.
+## What It Does
+- **Input**: Final state after Execution or after Risk Guard veto.
+- **Process**: Serialises key fields (ticker, veto, execution status, policy decision) → appends to `events.jsonl` via `PolicyMemoryStore`.
+- **Output**: Returns a `reasoning_logs` entry (informational only; not consumed by any downstream node).
 
-## SOP
-1. **Input**: All node outputs (signals, reports, memos, proposals, vetoes, orders).
-2. **Process**: Validate structure → timestamp → persist to audit store.
-3. **Output**: Structured log entries (not visible to trading pipeline).
-4. **Feedback**: Generate periodic audit reports: latencies, error rates, decision distributions.
+## Why It Exists
+- **Auditability**: Every cycle leaves a persistent trace in `events.jsonl`.
+- **Memory for Policy Orchestrator**: The Orchestrator reads memory to decide the next cycle's policy preset.
+- **Replay**: Historical `events.jsonl` can be replayed for backtesting and debugging.
 
-## Rules / Constraints
-- Never alters or filters the data — records everything.
-- Audit logs are append-only; no deletion.
-- Audit must be available for replay without side effects.
+## Rules
+- Append-only — never modifies past entries.
+- Never alters state — read-only on state.
+- Has no effects on trading, signals, or execution.
