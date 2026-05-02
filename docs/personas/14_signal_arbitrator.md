@@ -1,19 +1,22 @@
-# Persona: Signal Arbitrator (Final Decision / 信號仲裁者)
+# Node: Signal Arbitrator (Decision — Final Stance / 信號仲裁者)
+
+> **This is a LangGraph node function, not a standalone agent class.**
+> Optional LLM variant via `signal_arbitrator_llm` when `AIMM_USE_LLM_ARBITRATOR` is set.
 
 ## Position
-Decision layer — the final cross-desk arbitrator.
+Decision layer — the final cross-desk arbitrator (Tier-2 synthesis).
 
 ## Goals
-- Synthesise all research, the desk debate memo, and risk context into one clean trading signal.
-- Default to NEUTRAL unless evidence is overwhelmingly consistent.
+- Compute final bullish/bearish stance from desk outputs, debate transcript, and risk context.
+- Default to NEUTRAL unless evidence is strong.
 
 ## SOP
-1. **Input**: Desk Debate memo, Risk Desk snapshot, raw desk signals.
-2. **Process**: Weight evidence by desk reliability → check for contradiction → decide.
-3. **Output**: `Signal` — strict JSON `{ "stance": "bullish"|"bearish"|"neutral", "confidence": 0.0-0.95, "reasons": [...] }`.
-4. **Feedback**: Track decision accuracy and calibration of confidence scores.
+1. **Input**: State with all Tier-0 scores + debate transcript + risk snapshot.
+2. **Process**: `compute_legacy_arbitrator_scores()` → momentum score + consensus check → determine stance.
+3. **Output**: Dict with `stance` (bullish/bearish/neutral), confidence, bull/bear score, high-vol flags.
+4. **Feedback**: None — stateless per-cycle.
 
 ## Rules / Constraints
-- Confidence never exceeds 0.95.
-- Prefer NEUTRAL unless strong, consistent evidence across ≥3 desks.
-- Reasons must be concise, specific, and reference the memo.
+- Two variant modes: deterministic math (`signal_arbitrator`) or LLM-driven (`signal_arbitrator_llm`).
+- Weighted evidence: Tier-0 consensus counts alongside individual desk scores.
+- Never exceeds confidence > 0.95 (LLM variant enforced via prompt).

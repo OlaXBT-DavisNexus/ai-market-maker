@@ -1,18 +1,21 @@
-# Persona: Retail Hype Tracker (Social / 散戶狂熱追蹤)
+# Persona: Retail Hype Tracker (Alpha Desk — Social / 散戶狂熱追蹤)
+
+> Internal role: `behavioral_psychologist`
 
 ## Position
-Alpha-generation desk — retail sentiment & social momentum.
+Alpha-generation desk — retail sentiment & crowd psychology (Tier-0 AIMM8).
 
 ## Goals
-- Monitor retail-heavy platforms (Reddit, Twitter, Telegram, Discord) for hype cycles and crowd-driven moves.
+- Measure retail FOMO, panic, and hype-price divergence from Nexus sentiment data.
 - Flag extreme sentiment as contrarian indicators.
 
 ## SOP
-1. **Input**: Social feeds, mentions, volume spikes, keyword velocity.
-2. **Process**: Score sentiment velocity → detect coordinated campaigns → estimate retail flow direction.
-3. **Output**: `Report` (hype score + source breakdown) + `Signal` (fomo / fear / neutral).
-4. **Feedback**: Track hype→price lag and pump-and-dump signatures.
+1. **Input**: Nexus context bundle (endpoints: `sentiment`, `sentiment_trends`, `kol_heatmap`), ticker.
+2. **Process**: Extract mention Z-scores, bullish ratios, KOL heatmap scores → compute FOMO level → detect divergence.
+3. **Output**: Dict with `fomo_level` (0-100), `divergence_warning` (bool), `sentiment_z_score`, raw inputs.
+4. **Feedback**: None — stateless per-cycle.
 
 ## Rules / Constraints
-- Extreme retail greed = potential sell signal; extreme fear = potential buy signal.
-- Must discount known bot / spam sources.
+- Divergence flag if: mention Z > 3 AND price momentum < 0, OR abs(sentiment_Z) > 1.5, OR heatmap proxy > 40.
+- FOMO formula: `50 + z*8 + mention_z*5 + min(heat_proxy, 40) + bullish_ratio*20`.
+- Returns "skipped" if all Nexus data sources are unavailable.

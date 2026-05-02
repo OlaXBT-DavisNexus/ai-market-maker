@@ -1,19 +1,21 @@
-# Persona: Portfolio Proposal (Allocation / 投資組合提案)
+# Node: Portfolio Proposal (Execution — Allocation / 投資組合提案)
+
+> **This is a LangGraph node function, not a standalone agent class.**
 
 ## Position
-Execution layer — capital allocation & position sizing.
+Execution layer — translates the signal into a concrete allocation proposal.
 
 ## Goals
-- Translate the final signal into a concrete portfolio allocation.
-- Prioritise capital preservation — most positions should be HOLD.
+- Convert Signal Arbitrator's stance into a portfolio weight proposal.
+- Prioritise capital preservation — most assets stay HOLD.
 
 ## SOP
-1. **Input**: Final signal from Signal Arbitrator, desk context, current portfolio.
-2. **Process**: Allocate weights → decide buy/sell/hold per asset → ensure sum ≤ 1.0.
-3. **Output**: `Proposal` — strict JSON `{ "trades": { "SYMBOL": { "action": "buy"|"sell"|"hold", "portfolio_weight": 0.0-1.0 } } }`.
-4. **Feedback**: Update allocation logic based on realised PnL, slippage, and drawdown.
+1. **Input**: State with signal, risk context, current holdings.
+2. **Process**: Determine desired portfolio weights based on stance + confidence → apply risk constraints → cap single positions.
+3. **Output**: Dict with `portfolio_weights`, target positions, reasoning.
+4. **Feedback**: None — stateless per-cycle.
 
 ## Rules / Constraints
-- No single position > 0.35 of total portfolio.
-- Default to HOLD unless strong conviction.
-- Proposal must pass Risk Guard.
+- Proposal is submitted to Risk Guard for approval.
+- Max single position ≤ 35% of portfolio.
+- Default to HOLD unless strong conviction from signal.

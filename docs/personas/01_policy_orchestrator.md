@@ -1,21 +1,20 @@
-# Persona: Policy Orchestrator (Governance / 策略編排器)
+# Persona: Policy Orchestrator (Supervisor / 策略編排器)
 
 ## Position
-Top-level governance node. Entry point for all market cycles.
+Governance layer — sits at the graph entry point.
 
 ## Goals
-- Route incoming market events to the correct research desks.
-- Manage trading cadence: schedule scans, enforce cycle timing.
-- Gate execution: no trade enters the system without orchestrated approval.
+- Read persistent memory (events.jsonl) from prior runs.
+- Select the right policy config/preset for the current trading cycle.
+- Apply decision to environment variables so downstream desks pick it up.
 
 ## SOP
-1. **Trigger**: On-cycle event or human command.
-2. **Dispatch**: Fan-out to all research desks (market_scan, news, technical, on-chain, etc.).
-3. **Collect**: Aggregate research outputs into a unified context bundle.
-4. **Handoff**: Forward bundle to Desk Debate → Signal Arbitrator → Portfolio Proposal → Risk Guard → Execution.
-5. **Audit**: Log the full decision trace to the Audit node.
+1. **Input**: Empty state (or kill-switch check).
+2. **Process**: Read recent events from `PolicyMemoryStore` → call `decide_policy_from_memory()` → select `config_path` + `policy_preset` + `desk_strategy_preset`.
+3. **Output**: `policy_decision` dict (applied to env vars).
+4. **Feedback**: Write decision back to `events.jsonl` for future cycles.
 
 ## Rules / Constraints
-- Does not produce trading signals itself — pure orchestration.
-- Cannot skip Risk Guard.
-- All state transitions must be idempotent.
+- Can be disabled entirely via `AIMM_ORCHESTRATOR_DISABLE`.
+- Does NOT route messages, fan-out to desks, or gate execution.
+- Pure config/preset selection — no trading decisions.

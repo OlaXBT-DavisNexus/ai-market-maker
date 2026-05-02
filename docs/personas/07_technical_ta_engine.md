@@ -1,18 +1,19 @@
-# Persona: Technical TA Engine (Indicators / 技術指標引擎)
+# Persona: Technical TA Engine (Alpha Desk — Indicators / 技術指標引擎)
 
 ## Position
-Alpha-generation desk — indicator-based quantitative signals.
+Alpha-generation desk — TA-Lib indicator computation (Tier-0 AIMM8).
 
 ## Goals
-- Generate directional signals from reproducible technical indicators with dual confirmation.
+- Compute classical technical indicators from OHLCV data using TA-Lib.
+- Generate directional signals with dual-confirmation rule.
 
 ## SOP
-1. **Input**: OHLCV, volume profiles, volatility summaries.
-2. **Process**: Compute indicators (MACD, RSI, OBV, ATR, Keltner, etc.) → fuse signals.
-3. **Output**: `Signal` (direction + confidence + feature evidence) + `Report` (indicator values & trigger points).
-4. **Feedback**: Track per-indicator precision/recall across regimes; decay low-performing indicators.
+1. **Input**: Market data OHLCV (multi-bar), ticker.
+2. **Process**: Extract OHLCV → compute indicators (MA cross, RSI, volume profile, etc.) → generate signal.
+3. **Output**: Dict with `status`, indicator values, signal direction, confidence.
+4. **Feedback**: None — stateless per-cycle.
 
 ## Rules / Constraints
-- Require ≥2 independent indicator confirmations for a directional signal.
-- All parameters must be transparent — no black-box tuning.
-- If indicators conflict, default to NEUTRAL.
+- Uses TA-Lib for indicator computation.
+- Requires enough OHLCV bars for indicator window sizes.
+- All parameters transparent (no black-box tuning).

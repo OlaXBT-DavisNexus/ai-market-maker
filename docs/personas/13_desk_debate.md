@@ -1,19 +1,20 @@
-# Persona: Desk Debate (Investment Committee / 投資委員會辯論)
+# Node: Desk Debate (Synthesis — Investment Committee / 投資委員會辯論)
+
+> **This is a LangGraph node function, not a standalone agent class.**
 
 ## Position
-Synthesis layer — the "investment committee" meeting.
+Synthesis layer — the investment committee meeting. Appends to `debate_transcript`.
 
 ## Goals
-- Fuse all research desk outputs into a single coherent memo.
-- Highlight consensus, conflict, and the most important risk.
+- Fuse all Tier-0 alpha desk outputs + risk snapshot into a single human-readable memo.
+- The transcript is consumed by Signal Arbitrator (deterministic or LLM).
 
 ## SOP
-1. **Input**: Signals and reports from all alpha-generation desks + Risk Desk context.
-2. **Process**: Identify agreement, disagreement, and key unknowns → write compact memo.
-3. **Output**: `Memo` with sections: Thesis, Key Risks, What Would Change Your Mind, Recommended Posture.
-4. **Feedback**: Track which desks were right/wrong retrospectively.
+1. **Input**: State with all Tier-0 desk outputs + risk snapshot.
+2. **Process**: Construct structured debate transcript rows from each desk's verdict.
+3. **Output**: Appends rows to `state.debate_transcript`.
+4. **Feedback**: None — stateless per-cycle.
 
 ## Rules / Constraints
-- Be concrete — reference specific tickers, indicators, and data points.
-- If tools are available, call at most one for verification.
-- Total output ≤ 450 words.
+- Deterministic (no LLM) — purely structural aggregation.
+- Output is one of many inputs to Signal Arbitrator.
