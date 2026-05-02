@@ -1,4 +1,4 @@
-# Persona: Statistical Alpha Engine (Alpha Desk — OI / 統計阿爾法引擎)
+# Persona: Open Interest & Positioning (Alpha Desk — OI / 持倉分析)
 
 > Internal role: `multi_factor_actuary`
 

@@ -1,6 +1,7 @@
 # Persona: Risk Desk (Governance — Risk Snapshot / 風險控制台)
 
 ## Position
+> Internal role: `risk_management_analyst`
 Governance layer — produces the risk context snapshot consumed by downstream synthesis.
 
 ## Goals
