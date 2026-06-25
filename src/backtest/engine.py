@@ -21,6 +21,7 @@ from flow_log import FlowEventRepo, set_flow_repo
 from harness.run_memory import IterationReceiptWriter, RunWorkingMemory, now_s, run_memory_config
 from main import build_workflow
 
+from backtest.data_quality import validate_ohlcv_window
 from .langgraph_adapter import run_perp_backtest
 
 
@@ -309,18 +310,17 @@ class BacktestEngine:
             )
 
             # ── OHLCV data quality gate ──────────────────────────────────────
-            from backtest.data_quality import validate_ohlcv_window
-
             dq_passed = True
             dq_warnings: list[str] = []
             primary_md = state.get("market_data", {}).get(symbol, {})
             ohlcv_for_dq = primary_md.get("ohlcv", window) if isinstance(window, list) else window
             if isinstance(ohlcv_for_dq, list):
-                expected_ticker = str(state.get("ticker", symbol) or symbol)
+                # expected_ticker = symbol (current symbol's ticker, not state["ticker"])
+                # this prevents false ticker_match failures in multi-symbol runs
                 dq_result = validate_ohlcv_window(
                     ohlcv_for_dq,
                     symbol=symbol,
-                    expected_ticker=expected_ticker,
+                    expected_ticker=symbol,
                     interval_sec=int(c.get("interval_sec", 300)),
                     min_bars=2,
                 )
@@ -331,14 +331,19 @@ class BacktestEngine:
             if not dq_passed:
                 # Critical failure: skip invoke, return HOLD
                 logger.warning("data_quality FAIL for %s bar %d: %s", symbol, len(window), " | ".join(dq_warnings))
-                rec = {
-                    "symbol": str(symbol),
-                    "bar_index": len(window) - 1 if isinstance(window, list) else 0,
-                    "action": "HOLD",
-                    "confidence": 0.0,
-                    "data_quality": {"passed": False, "warnings": dq_warnings},
-                    "reason": "data_quality_gate",
-                }
+                try:
+                    receipt_writer.append({
+                        "ts": now_s(),
+                        "run_id": run_id,
+                        "symbol": str(symbol),
+                        "backtest": sm.get("backtest"),
+                        "memory": run_mem.to_shared_memory_fragment(),
+                        "decision": {"action": "HOLD", "stance": "neutral", "confidence": 0.0},
+                        "data_quality": {"passed": False, "warnings": dq_warnings},
+                        "reason": "data_quality_gate",
+                    })
+                except Exception:
+                    pass
                 return 0.0
 
             invoke_cache_hit = False
@@ -459,16 +464,17 @@ class BacktestEngine:
             except Exception as exc:
                 # Always emit a receipt even on failure so operators can see what was attempted.
                 try:
-                    receipt_writer.append(
-                        {
-                            "ts": now_s(),
-                            "run_id": run_id,
-                            "symbol": str(symbol),
-                            "backtest": sm.get("backtest"),
-                            "memory": run_mem.to_shared_memory_fragment(),
-                            "error": str(exc),
-                        }
-                    )
+                    err_rec: dict[str, Any] = {
+                        "ts": now_s(),
+                        "run_id": run_id,
+                        "symbol": str(symbol),
+                        "backtest": sm.get("backtest"),
+                        "memory": run_mem.to_shared_memory_fragment(),
+                        "error": str(exc),
+                    }
+                    if invoke_cache_hit:
+                        err_rec["invoke_cache_shared"] = True
+                    receipt_writer.append(err_rec)
                 except Exception:
                     pass
                 import traceback
