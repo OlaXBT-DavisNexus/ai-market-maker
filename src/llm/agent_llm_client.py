@@ -319,6 +319,62 @@ def _build_deterministic_context(contract: dict[str, Any] | None, agent_id: str)
     return "\n".join(parts)
 
 
+def _build_simulation_context(state: dict[str, Any], ticker: str | None) -> str:
+    """Build the ## Simulation Context block for backtest agents.
+
+    Provides as-of bar timestamp, interval, window bounds, and run_id
+    so agents know they are reasoning on historical data — not live.
+    """
+    if state.get("run_mode") != "backtest":
+        return ""
+
+    sm = state.get("shared_memory", {}) or {}
+    bt = sm.get("backtest", {}) or {}
+
+    window_ts = bt.get("window_last_ts_ms")
+    window_len = bt.get("window_len")
+    interval_sec = bt.get("interval_sec", 300)
+    timeframe = bt.get("timeframe", "")
+    run_id = bt.get("run_id", "")
+
+    # Resolve ticker
+    sym = ticker or state.get("ticker", "BTC/USDT")
+    universe = state.get("universe", [sym])
+
+    # Compute window date bounds from OHLCV
+    ohlcv = _ohlcv_for_ticker(state, sym)
+    first_bar_ts = None
+    last_bar_ts = None
+    if ohlcv and isinstance(ohlcv, list) and len(ohlcv) > 0:
+        try:
+            first_bar_ts = ohlcv[0][0]
+            last_bar_ts = ohlcv[-1][0]
+        except (IndexError, TypeError):
+            pass
+
+    from datetime import datetime, timezone
+
+    fmt = lambda ms: datetime.fromtimestamp(ms / 1000, tz=timezone.utc).isoformat() if ms else "N/A"  # noqa: E731
+    tf_str = f"{interval_sec}s"
+    if timeframe:
+        tf_str = f"{interval_sec}s ({timeframe})"
+
+    lines = [
+        "## Simulation Context",
+        f"- Mode: backtest",
+        f"- Primary ticker: {sym}",
+        f"- Bar interval: {tf_str}",
+        f"- As-of bar (UTC): {fmt(window_ts)}",
+        f"- Window: {window_len or '?'} bars | first bar: {fmt(first_bar_ts)} | last bar: {fmt(last_bar_ts)}",
+    ]
+    if run_id:
+        lines.append(f"- Run ID: {run_id}")
+    if len(universe) > 1:
+        lines.append(f"- Universe: {', '.join(universe)}")
+
+    return "\n".join(lines)
+
+
 def _build_market_context(
     state: dict[str, Any],
     ticker: str | None = None,
@@ -333,6 +389,7 @@ def _build_market_context(
     - Order book depth
     - Nexus news / funding / OI / on-chain
     - Deterministic Tier-0 findings (context only, not fallback)
+    - Simulation context block (backtest mode only)
     """
     if not ticker:
         ticker = state.get("ticker", "BTC/USDT")
@@ -358,6 +415,11 @@ def _build_market_context(
         det = _build_deterministic_context(deterministic_contract, agent_id)
         if det:
             lines.append(f"\n## Deterministic Baseline\n{det}")
+
+    # Simulation context block (only for backtest mode)
+    sim = _build_simulation_context(state, ticker)
+    if sim:
+        lines.append(f"\n{sim}")
 
     return "\n".join(lines)
 
@@ -399,6 +461,11 @@ def _build_agent_prompt(
         "```\n"
         "- Every field is required. If you have no strong opinion, use the neutral default shown above.\n"
         '- Add a "reasoning" field (string) explaining your key signal adjustments.\n'
+        '\n'
+        '### Backtest Mode Notice\n'
+        '- You are evaluating **historical simulation data**, not live markets.\n'
+        '- Base your reasoning only on the OHLCV window and as-of timestamp above.\n'
+        "\n"
         "Output ONLY the JSON on a single line or pretty-printed. No preamble, no markdown fences.\n"
     )
 

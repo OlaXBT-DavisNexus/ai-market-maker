@@ -274,6 +274,7 @@ class BacktestEngine:
             }
 
             sm = state.setdefault("shared_memory", {})
+            iv_sec = int(c.get("interval_sec", 300))
             sm["backtest"] = {
                 "cash": float(capital),
                 "positions": {
@@ -288,6 +289,10 @@ class BacktestEngine:
                     and len(window[-1]) > 0
                     else None
                 ),
+                "interval_sec": iv_sec,
+                "timeframe": c.get("timeframe", ""),
+                "run_id": c.get("run_id", ""),
+                "symbol": str(symbol),
             }
             # Persisted run memory (bounded, explicit).
             sm["memory"] = run_mem.to_shared_memory_fragment()
@@ -302,6 +307,39 @@ class BacktestEngine:
                     "window_last_ts_ms": last_ts,
                 }
             )
+
+            # ── OHLCV data quality gate ──────────────────────────────────────
+            from backtest.data_quality import validate_ohlcv_window
+
+            dq_passed = True
+            dq_warnings: list[str] = []
+            primary_md = state.get("market_data", {}).get(symbol, {})
+            ohlcv_for_dq = primary_md.get("ohlcv", window) if isinstance(window, list) else window
+            if isinstance(ohlcv_for_dq, list):
+                expected_ticker = str(state.get("ticker", symbol) or symbol)
+                dq_result = validate_ohlcv_window(
+                    ohlcv_for_dq,
+                    symbol=symbol,
+                    expected_ticker=expected_ticker,
+                    interval_sec=int(c.get("interval_sec", 300)),
+                    min_bars=2,
+                )
+                dq_passed = dq_result.passed
+                dq_warnings = dq_result.warnings
+                sm["backtest"]["data_quality"] = {"passed": dq_passed, "warnings": dq_warnings, "checks": dq_result.checks}
+
+            if not dq_passed:
+                # Critical failure: skip invoke, return HOLD
+                logger.warning("data_quality FAIL for %s bar %d: %s", symbol, len(window), " | ".join(dq_warnings))
+                rec = {
+                    "symbol": str(symbol),
+                    "bar_index": len(window) - 1 if isinstance(window, list) else 0,
+                    "action": "HOLD",
+                    "confidence": 0.0,
+                    "data_quality": {"passed": False, "warnings": dq_warnings},
+                    "reason": "data_quality_gate",
+                }
+                return 0.0
 
             try:
                 # One workflow.invoke per bar window (shared across symbols).

@@ -18,10 +18,13 @@ Config keys (all plain dict, no env vars):
 from __future__ import annotations
 
 import json
+import logging
 import time
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
+
+logger = logging.getLogger(__name__)
 
 from config.runs_paths import runs_dir as _default_runs_dir
 
@@ -46,6 +49,7 @@ class Position:
     leverage: float
     initial_margin: float
     entry_bar_index: int
+    entry_ts_ms: int = 0
     entry_commission: float = 0.0
 
 
@@ -62,7 +66,10 @@ class Trade:
     exit_reason: str
     holding_bars: int
     commission: float
-    #: Bar open time (OHLCV ms or sec) when the trade was closed — for ledgers / UI.
+    entry_bar_index: int = 0
+    #: Bar open time (OHLCV ms or sec) when the trade was opened.
+    entry_ts_ms: int = 0
+    #: Bar open time (OHLCV ms or sec) when the trade was closed.
     exit_ts_ms: int = 0
     #: Bar index at exit (0-based) for UI step column.
     exit_bar_index: int = 0
@@ -360,6 +367,7 @@ class PerpEngine:
                 leverage=self.leverage,
                 initial_margin=margin,
                 entry_bar_index=self._bar_index,
+                entry_ts_ms=int(self._last_bar_ts),
                 entry_commission=comm,
             )
 
@@ -397,6 +405,8 @@ class PerpEngine:
                 exit_reason=reason,
                 holding_bars=holding,
                 commission=pos.entry_commission + exit_comm,
+                entry_bar_index=int(pos.entry_bar_index),
+                entry_ts_ms=int(pos.entry_ts_ms),
                 exit_ts_ms=ts_exit,
                 exit_bar_index=int(self._bar_index),
             )
@@ -613,6 +623,9 @@ class PerpEngine:
                 "commission": round(t.commission, 8),
                 "exit_bar_index": int(t.exit_bar_index),
             }
+            rec["entry_bar_index"] = int(t.entry_bar_index)
+            if int(t.entry_ts_ms) > 0:
+                rec["entry_ts_ms"] = int(t.entry_ts_ms)
             if int(t.exit_ts_ms) > 0:
                 # Binance ``myTrades``-style epoch ms — ``normalize_trade_row_for_api`` maps to ``ts_ms`` for web UI.
                 rec["time"] = int(t.exit_ts_ms)
@@ -657,6 +670,27 @@ class PerpEngine:
             "start_iso": start_iso,
             "end_iso": end_iso,
         }
+
+        # ── Export bundle (CSV + ledger + manifest) ────────────────────────
+        try:
+            from backtest.export_bundle import write_analysis_bundle
+
+            events_path = runs_dir / f"bt_{run_id}.events.jsonl" \
+                if (runs_dir / f"bt_{run_id}.events.jsonl").is_file() else None
+            export_files = write_analysis_bundle(
+                out_dir,
+                run_id=run_id,
+                summary=summary,
+                trades=trade_records,
+                snapshots=eq_records,
+                events_path=events_path,
+                symbols=symbols,
+                total_bars=len(self.snapshots),
+            )
+            summary["export_files"] = export_files
+        except Exception as exc:
+            logger.warning("export_bundle failed for %s: %s", run_id, exc)
+
         (out_dir / "summary.json").write_text(json.dumps(summary, indent=2))
 
         return summary
