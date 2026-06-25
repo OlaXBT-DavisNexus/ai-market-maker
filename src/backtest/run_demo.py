@@ -720,6 +720,9 @@ def main(argv: list[str] | None = None) -> dict[str, Any]:
             args.tp_sl_pct = 5.0
         if not args.forward_validate:
             args.forward_validate = True
+        # Auto-enable verbose receipts for quality runs (T14)
+        if os.environ.get("AIMM_BACKTEST_VERBOSE_RECEIPTS") is None:
+            os.environ["AIMM_BACKTEST_VERBOSE_RECEIPTS"] = "1"
         print(
             "[quality] preset: --steps 200 --min-trades 30 --tp-sl-pct 5 --forward-validate",
             file=sys.stderr,
