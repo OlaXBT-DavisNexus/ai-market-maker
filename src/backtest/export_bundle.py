@@ -12,6 +12,7 @@ from __future__ import annotations
 import csv
 import json
 import logging
+import os
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any
@@ -207,6 +208,7 @@ def write_export_manifest(
     """Write ``export_manifest.json`` with schema version and metrics summary."""
     metrics = summary.get("metrics", summary)
     quality = summary.get("quality_report", {})
+    per_sym = os.environ.get("AIMM_BACKTEST_PER_SYMBOL_INVOKE", "").strip() == "1"
     manifest = {
         "schema_version": "backtest_export/v1",
         "run_id": run_id,
@@ -222,6 +224,10 @@ def write_export_manifest(
             "sharpe": metrics.get("sharpe"),
             "total_pnl_usd": metrics.get("total_pnl_usd", metrics.get("total_pnl")),
             "quality_overall_passed": quality.get("overall_passed", quality.get("passed")),
+        },
+        "invoke_cache": {
+            "shared": not per_sym,
+            "per_symbol": per_sym,
         },
     }
     path.write_text(json.dumps(manifest, indent=2, default=str))

@@ -40,21 +40,7 @@ def _get_decision_cache() -> Any:
     return _DECISION_CACHE
 
 
-def _cache_key_for_agent(
-    agent_id: str,
-    ticker: str | None,
-    prompt_text: str,
-) -> str | None:
-    """Generate a deterministic cache key for this agent call.
 
-    Returns None if caching is disabled.
-    """
-    cache = _get_decision_cache()
-    enabled_fn = cache.get("enabled")
-    if enabled_fn and not enabled_fn():
-        return None
-    raw = f"{agent_id}|{ticker or ''}|{prompt_text}"
-    return hashlib.sha256(raw.encode()).hexdigest()
 
 
 logger = logging.getLogger(__name__)
@@ -605,21 +591,31 @@ def infer_agent(
     system, user = _build_agent_prompt(agent_id, persona, skill, market_context)
 
     # Decision cache: check before LLM call
-    cache = _get_decision_cache()
     full_prompt = system + "\n" + user
-    ck = _cache_key_for_agent(agent_id, ticker or state.get("ticker", ""), full_prompt)
-    if ck:
-        cached = cache.get("read")
-        if cached:
-            hit = cached(agent_id, ck)
-            if hit is not None:
-                logger.info("agent_llm: cache HIT for %s (key=%s...)", agent_id, ck[:12])
-                hit["agent"] = agent_id
-                hit["agent_id"] = agent_id
-                hit["source"] = "agent_llm"
-                hit["llm_enabled"] = True
-                hit["cached"] = True
-                return _fill_missing_fields(hit, agent_id)
+    prompt_hash = hashlib.sha256(full_prompt.encode()).hexdigest()[:32]
+    resolved_ticker = ticker or state.get("ticker", "")
+    # date_tag: bar timestamp from backtest shared_memory, or fallback
+    sm = state.get("shared_memory", {}) or {}
+    bt = sm.get("backtest", {}) or {}
+    bar_ts_ms = bt.get("window_last_ts_ms")
+    date_tag = str(int(bar_ts_ms)) if bar_ts_ms else "no_date"
+
+    cache = _get_decision_cache()
+    read_fn = cache.get("read")
+    write_fn = cache.get("write")
+    if read_fn:
+        hit = read_fn(agent_id, resolved_ticker, date_tag, prompt_hash)
+        if hit is not None:
+            logger.info(
+                "agent_llm: cache HIT for %s (ticker=%s, date=%s)",
+                agent_id, resolved_ticker, date_tag,
+            )
+            hit["agent"] = agent_id
+            hit["agent_id"] = agent_id
+            hit["source"] = "agent_llm"
+            hit["llm_enabled"] = True
+            hit["cached"] = True
+            return _fill_missing_fields(hit, agent_id)
 
     try:
         resp = client.chat.completions.create(
@@ -650,10 +646,9 @@ def infer_agent(
     result["llm_enabled"] = True
 
     # Write to cache for reproducibility
-    write_fn = cache.get("write")
-    if ck and write_fn:
+    if write_fn:
         try:
-            write_fn(agent_id, ck, result)
+            write_fn(agent_id, resolved_ticker, date_tag, prompt_hash, result)
         except Exception as e:
             logger.debug("agent_llm: cache write failed: %s", e)
 

@@ -341,15 +341,23 @@ class BacktestEngine:
                 }
                 return 0.0
 
+            invoke_cache_hit = False
+            per_sym_invoke = os.environ.get("AIMM_BACKTEST_PER_SYMBOL_INVOKE", "").strip() == "1"
+
             try:
                 # One workflow.invoke per bar window (shared across symbols).
-                bar_key = len(window)
+                if per_sym_invoke:
+                    # Per-symbol cache: keyed by (window_len, symbol)
+                    bar_key = (len(window), symbol)
+                else:
+                    bar_key = len(window)
                 cached = _invoke_cache.get(bar_key)
                 if cached is None:
                     output = self.workflow.invoke(state)
                     _invoke_cache[bar_key] = output
                 else:
                     output = cached
+                    invoke_cache_hit = True
                 # `proposed_signal` can be overwritten later in the graph (e.g. by portfolio_proposal),
 
                 # but `trade_intent` is the stable BUY/SELL/HOLD contract we want to backtest.
@@ -439,6 +447,8 @@ class BacktestEngine:
                         "memory": run_mem.to_shared_memory_fragment(),
                         "decision": {"action": action, "stance": stance, "confidence": conf},
                     }
+                    if invoke_cache_hit:
+                        rec["invoke_cache_shared"] = True
                     if os.environ.get("AIMM_BACKTEST_VERBOSE_RECEIPTS") == "1":
                         if isinstance(output, dict):
                             _build_tier0_summary(rec, output)
