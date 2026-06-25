@@ -95,14 +95,14 @@ class TestWriteEquityCsv:
 
 
 class TestWriteAuditLedger:
-    def test_merged_stream(self):
+    def test_merged_stream_flat_format(self):
+        """Legacy flat format (action at top level) still parsed."""
         tmp_dir = Path(tempfile.mkdtemp())
         ledger_path = tmp_dir / "audit_trail_ledger.jsonl"
 
-        # Create iterations.jsonl
         iterations = [
-            {"action": "BUY", "confidence": 0.7, "bar_index": 0, "stance": "bullish", "ts_ms": 1700000000000},
-            {"action": "HOLD", "confidence": 0.5, "bar_index": 1, "stance": "neutral", "ts_ms": 1700000001000},
+            {"action": "BUY", "confidence": 0.7, "bar_index": 0, "symbol": "BTC/USDT", "ts": 1700000000},
+            {"action": "HOLD", "confidence": 0.5, "bar_index": 1, "symbol": "BTC/USDT", "ts": 1700000001},
         ]
         (tmp_dir / "iterations.jsonl").write_text(
             "\n".join(json.dumps(r) for r in iterations)
@@ -113,18 +113,65 @@ class TestWriteAuditLedger:
         assert len(lines) == 2
         assert lines[0]["event_type"] == "decision"
         assert lines[0]["run_id"] == "bt_12345"
+        assert lines[0]["decision"]["action"] == "BUY"
+        assert lines[0]["symbol"] == "BTC/USDT"
+
+    def test_merged_stream_nested_format(self):
+        """Modern nested decision dict."""
+        tmp_dir = Path(tempfile.mkdtemp())
+        ledger_path = tmp_dir / "audit_trail_ledger.jsonl"
+
+        iterations = [
+            {
+                "decision": {"action": "SELL", "confidence": 0.8, "stance": "bearish"},
+                "bar_index": 0, "symbol": "ETH/USDT", "ts": 1700000000, "memory": {"key": "val"},
+            },
+        ]
+        (tmp_dir / "iterations.jsonl").write_text(
+            json.dumps(iterations[0]) + "\n"
+        )
+
+        write_audit_ledger(tmp_dir, ledger_path, run_id="bt_67890")
+        lines = [json.loads(l) for l in ledger_path.read_text().splitlines() if l.strip()]
+        assert len(lines) == 1
+        assert lines[0]["decision"]["action"] == "SELL"
+        assert lines[0]["decision"]["confidence"] == 0.8
+        assert lines[0]["symbol"] == "ETH/USDT"
+        assert lines[0]["memory_fragment"] == {"key": "val"}
+        assert lines[0]["bar_index"] == 0
+
+    def test_merged_stream_hybrid_format(self):
+        """Both nested decision dict AND legacy flat keys work."""
+        tmp_dir = Path(tempfile.mkdtemp())
+        ledger_path = tmp_dir / "audit_trail_ledger.jsonl"
+
+        iterations = [
+            {
+                "decision": {"action": "BUY", "confidence": 0.7},
+                "bar_index": 0, "symbol": "BTC/USDT", "ts": 1700000000,
+            },
+            {"ts": 1700000001, "action": "HOLD"},  # legacy: no decision dict
+        ]
+        (tmp_dir / "iterations.jsonl").write_text(
+            "\n".join(json.dumps(r) for r in iterations)
+        )
+
+        write_audit_ledger(tmp_dir, ledger_path, run_id="bt_12345")
+        lines = [json.loads(l) for l in ledger_path.read_text().splitlines() if l.strip()]
+        assert len(lines) == 2
+        assert lines[0]["decision"]["action"] == "BUY"
+        assert lines[1]["decision"]["action"] == "HOLD"
 
     def test_flow_event_merging(self):
         tmp_dir = Path(tempfile.mkdtemp())
         ledger_path = tmp_dir / "audit_trail_ledger.jsonl"
         events_path = tmp_dir / "events.jsonl"
 
-        # Create iteration and event
         (tmp_dir / "iterations.jsonl").write_text(
-            json.dumps({"action": "SELL", "bar_index": 0, "ts_ms": 1700000000000}) + "\n"
+            json.dumps({"decision": {"action": "SELL"}, "bar_index": 0, "symbol": "BTC/USDT", "ts": 1700000000}) + "\n"
         )
         events_path.write_text(
-            json.dumps({"node": "arbitrator", "status": "complete", "bar_time_utc_ms": 1700000000000}) + "\n"
+            json.dumps({"node": "arbitrator", "status": "complete", "bar_time_utc_ms": 1700000000}) + "\n"
         )
 
         write_audit_ledger(tmp_dir, ledger_path, run_id="bt_12345", events_path=events_path)
@@ -157,6 +204,8 @@ class TestWriteExportManifest:
         assert manifest["metrics_summary"]["sharpe"] == 4.47
         assert manifest["metrics_summary"]["quality_overall_passed"] is False
         assert manifest["files"]["trades_record_csv"] == "trades_record.csv"
+        assert manifest.get("invoke_cache", {}).get("shared") is True
+        assert manifest.get("invoke_cache", {}).get("per_symbol") is False
 
 
 class TestWriteAnalysisBundle:

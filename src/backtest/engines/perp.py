@@ -110,6 +110,7 @@ class PerpEngine:
         self._bar_index: int = 0
         self._last_bar_ts: int = 0
         self.interval_sec: int = max(60, int(cfg.get("interval_sec", 300)))
+        self.timeframe: str = str(cfg.get("timeframe", ""))
 
         # Take-profit / stop-loss levels (fractional, e.g. 5.0 = ±5% from entry)
         self.take_profit_pct: float = float(cfg.get("take_profit_pct", 0.0))
@@ -610,6 +611,7 @@ class PerpEngine:
         trade_records = []
         for t in self.trades:
             rec: dict[str, Any] = {
+                "run_id": run_id,
                 "symbol": t.symbol,
                 "direction": t.direction,
                 "entry_price": t.entry_price,
@@ -655,10 +657,11 @@ class PerpEngine:
             "final_equity": round(self.snapshots[-1].equity, 2)
             if self.snapshots
             else self.initial_cash,
+            "timeframe": self.timeframe,
+            "interval_sec": self.interval_sec,
             "metrics": metrics,
             "benchmark": benchmark,
             "symbols": symbols,
-            "interval_sec": self.interval_sec,
             "bar_interval_sec_inferred": self._infer_bar_interval_sec_from_snapshots(),
             "equity_convention": (
                 "USDT-margined linear perpetual model: equity = free_collateral + Σ(locked_initial_margin "
@@ -675,8 +678,9 @@ class PerpEngine:
         try:
             from backtest.export_bundle import write_analysis_bundle
 
-            events_path = runs_dir / f"bt_{run_id}.events.jsonl" \
-                if (runs_dir / f"bt_{run_id}.events.jsonl").is_file() else None
+            # run_id already starts with bt_ — no double prefix
+            events_path = runs_dir / f"{run_id}.events.jsonl" \
+                if (runs_dir / f"{run_id}.events.jsonl").is_file() else None
             export_files = write_analysis_bundle(
                 out_dir,
                 run_id=run_id,

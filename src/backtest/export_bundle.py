@@ -138,23 +138,41 @@ def write_audit_ledger(
                 except json.JSONDecodeError:
                     continue
                 seq += 1
-                ts_ms = row.get("ts_ms", row.get("timestamp", row.get("bar_time_ms", 0)))
+
+                # Timestamp: rec from engine.py writes "ts" (float sec),
+                # but some older formats use "ts_ms" or "timestamp" directly.
+                ts_ms = row.get("ts") or row.get("ts_ms") or row.get("timestamp") or row.get("bar_time_ms", 0)
+                if ts_ms and ts_ms < 1e13:
+                    # ts is in seconds (from engine.now_s()) — convert to ms
+                    ts_ms = int(ts_ms * 1000)
+                else:
+                    ts_ms = int(ts_ms) if ts_ms else 0
+
                 bar_idx = row.get("bar_index", row.get("index", 0))
+
+                # Decision: nested "decision" dict (modern) or flat keys (legacy)
+                dec = row.get("decision") if isinstance(row.get("decision"), dict) else {}
+                dec_action = str(dec.get("action") or row.get("action", ""))
+                dec_confidence = float(dec.get("confidence") or row.get("confidence", 0.0))
+                dec_stance = str(dec.get("stance") or row.get("stance", ""))
+                trade_intent = dec.get("trade_intent") if isinstance(dec.get("trade_intent"), dict) else row.get("trade_intent", {})
+
                 rows.append({
                     "seq": seq,
-                    "ts_ms": int(ts_ms) if ts_ms else 0,
+                    "ts_ms": ts_ms,
                     "run_id": run_id,
                     "bar_index": int(bar_idx) if bar_idx else 0,
+                    "symbol": str(row.get("symbol", "")),
                     "event_type": "decision",
                     "decision": {
-                        "action": row.get("action", ""),
-                        "confidence": row.get("confidence", 0.0),
-                        "stance": row.get("stance", ""),
-                        "trade_intent": row.get("trade_intent", {}),
+                        "action": dec_action,
+                        "confidence": dec_confidence,
+                        "stance": dec_stance,
+                        "trade_intent": trade_intent,
                     },
                     "tier0_summary": row.get("tier0_summary", []),
                     "data_quality": row.get("data_quality"),
-                    "memory_fragment": row.get("memory_fragment"),
+                    "memory_fragment": row.get("memory") or row.get("memory_fragment"),
                 })
         except OSError:
             logger.warning("Could not read %s for audit ledger", iter_path)

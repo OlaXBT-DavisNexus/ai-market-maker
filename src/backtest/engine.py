@@ -8,9 +8,12 @@ Perp only (spot removed as of v1.0). Config via dict (no env vars).
 
 from __future__ import annotations
 
+import logging
 import os
 import time
 from dataclasses import dataclass
+
+logger = logging.getLogger(__name__)
 from pathlib import Path
 from typing import Any, Dict, List
 from typing import Any as _Any
@@ -47,6 +50,8 @@ class BacktestConfig:
     take_profit_pct: float = 0.0
     stop_loss_pct: float = 0.0
     max_hold_bars: int = 0
+    timeframe: str = ""
+    run_id: str = ""
 
 
 class BacktestEngine:
@@ -78,6 +83,8 @@ class BacktestEngine:
                 "deploy_profile_weights": getattr(config, "deploy_profile_weights", None),
                 "deploy_profile_id": getattr(config, "deploy_profile_id", None),
                 "deploy_arbitrator_mode": getattr(config, "deploy_arbitrator_mode", None),
+                "timeframe": config.timeframe,
+                "run_id": config.run_id,
             }
         else:
             self._cfg = dict(config or {})
@@ -135,6 +142,7 @@ class BacktestEngine:
             "take_profit_pct": float(c.get("take_profit_pct", 0.0)),
             "stop_loss_pct": float(c.get("stop_loss_pct", 0.0)),
             "max_hold_bars": int(c.get("max_hold_bars", 0)),
+            "timeframe": str(c.get("timeframe", "")),
         }
 
         bar_count = max(len(rows) for rows in bars_by_symbol.values())
@@ -322,7 +330,7 @@ class BacktestEngine:
                     symbol=symbol,
                     expected_ticker=symbol,
                     interval_sec=int(c.get("interval_sec", 300)),
-                    min_bars=2,
+                    min_bars=2 if isinstance(window, list) and len(window) >= 2 else 1,
                 )
                 dq_passed = dq_result.passed
                 dq_warnings = dq_result.warnings
@@ -444,14 +452,19 @@ class BacktestEngine:
 
                 # Persist a compact per-step receipt (what the agent saw + decided).
                 try:
+                    bar_index = len(window) - 1 if isinstance(window, list) else 0
                     rec: dict[str, Any] = {
                         "ts": now_s(),
                         "run_id": run_id,
+                        "bar_index": bar_index,
                         "symbol": str(symbol),
                         "backtest": sm.get("backtest"),
                         "memory": run_mem.to_shared_memory_fragment(),
                         "decision": {"action": action, "stance": stance, "confidence": conf},
                     }
+                    dq_store = sm.get("backtest", {}).get("data_quality", {})
+                    if dq_store.get("passed") is not None:
+                        rec["data_quality"] = dq_store
                     if invoke_cache_hit:
                         rec["invoke_cache_shared"] = True
                     if os.environ.get("AIMM_BACKTEST_VERBOSE_RECEIPTS") == "1":
